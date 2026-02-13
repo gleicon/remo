@@ -1,0 +1,33 @@
+# Binary
+remo
+remo.exe
+dist/
+
+# Test artifacts
+coverage.out
+*.test
+
+# Go build cache
+vendor/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# State / runtime
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+identity.json
+
+# Environment
+.env
+.env.*
