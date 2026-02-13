@@ -35,9 +35,6 @@ func newConnectCommand(r *rootCommand) *cobra.Command {
 }
 
 func runConnect(r *rootCommand, opts *connectOptions) error {
-	if opts.subdomain == "" {
-		return fmt.Errorf("subdomain is required")
-	}
 	id, err := identity.Load(opts.identity)
 	if err != nil {
 		return fmt.Errorf("load identity: %w", err)

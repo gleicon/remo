@@ -190,6 +190,9 @@ func (c *Client) sendHello(ctx context.Context, conn *websocket.Conn) error {
 		}
 		return fmt.Errorf("unexpected handshake response: %s", ack.Type)
 	}
+	if ack.Ready != nil && ack.Ready.Subdomain != "" {
+		c.cfg.Subdomain = ack.Ready.Subdomain
+	}
 	return nil
 }
 

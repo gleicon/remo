@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,18 +34,20 @@ const (
 )
 
 type Config struct {
-	Domain         string
-	Logger         zerolog.Logger
-	ReadTimeout    time.Duration
-	Authorizer     *auth.AuthorizedKeys
-	Mode           Mode
-	TLSCertFile    string
-	TLSKeyFile     string
-	TrustedProxies []*net.IPNet
-	TrustedHops    int
-	AdminSecret    string
-	Store          *store.Store
-	AutoReserve    bool
+	Domain          string
+	SubdomainPrefix string
+	Logger          zerolog.Logger
+	ReadTimeout     time.Duration
+	Authorizer      *auth.AuthorizedKeys
+	Mode            Mode
+	TLSCertFile     string
+	TLSKeyFile      string
+	TrustedProxies  []*net.IPNet
+	TrustedHops     int
+	AdminSecret     string
+	Store           *store.Store
+	AutoReserve     bool
+	AllowRandom     bool
 }
 
 type Server struct {
@@ -66,6 +70,21 @@ func New(cfg Config) *Server {
 		cfg.TrustedHops = 1
 	}
 	return &Server{cfg: cfg, log: cfg.Logger, registry: newRegistry(), store: cfg.Store, started: time.Now(), metrics: newMetrics()}
+}
+
+func (s *Server) routingDomain() string {
+	if s.cfg.SubdomainPrefix != "" {
+		return s.cfg.SubdomainPrefix + "." + s.cfg.Domain
+	}
+	return s.cfg.Domain
+}
+
+func generateRandomSubdomain() (string, error) {
+	buf := make([]byte, 4)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -152,8 +171,13 @@ func (s *Server) performHandshake(parent context.Context, conn *websocket.Conn) 
 		return "", nil, "", errors.New("invalid handshake")
 	}
 	payload := env.Hello
+	randomAssigned := false
+	originalSubdomain := payload.Subdomain
 	if payload.Subdomain == "" {
-		return "", nil, "", errors.New("missing subdomain")
+		if !s.cfg.AllowRandom {
+			return "", nil, "", errors.New("missing subdomain (random not enabled)")
+		}
+		randomAssigned = true
 	}
 	if !auth.FreshTimestamp(payload.Timestamp) {
 		return "", nil, "", errors.New("stale handshake")
@@ -170,9 +194,22 @@ func (s *Server) performHandshake(parent context.Context, conn *websocket.Conn) 
 		return "", nil, "", errors.New("invalid signature")
 	}
 	pub := ed25519.PublicKey(pubBytes)
-	message := auth.BuildHandshakeMessage(payload.Subdomain, payload.Timestamp)
+	message := auth.BuildHandshakeMessage(originalSubdomain, payload.Timestamp)
 	if !ed25519.Verify(pub, message, sigBytes) {
 		return "", nil, "", errors.New("signature mismatch")
+	}
+	if randomAssigned {
+		name, err := generateRandomSubdomain()
+		if err != nil {
+			return "", nil, "", errors.New("failed to generate subdomain")
+		}
+		for s.registry.has(name) {
+			name, err = generateRandomSubdomain()
+			if err != nil {
+				return "", nil, "", errors.New("failed to generate subdomain")
+			}
+		}
+		payload.Subdomain = name
 	}
 	if s.cfg.Authorizer != nil && !s.cfg.Authorizer.Allow(pub, payload.Subdomain) {
 		return "", nil, "", fmt.Errorf("unauthorized subdomain %s", payload.Subdomain)
@@ -195,7 +232,7 @@ func (s *Server) performHandshake(parent context.Context, conn *websocket.Conn) 
 	}
 	readyCtx, readyCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer readyCancel()
-	if err := protocol.Write(readyCtx, conn, &protocol.Envelope{Type: protocol.TypeReady, Ready: &protocol.ReadyPayload{Message: "ready"}}); err != nil {
+	if err := protocol.Write(readyCtx, conn, &protocol.Envelope{Type: protocol.TypeReady, Ready: &protocol.ReadyPayload{Message: "ready", Subdomain: payload.Subdomain}}); err != nil {
 		return "", nil, "", err
 	}
 	return payload.Subdomain, pub, pubKeyStr, nil
@@ -288,10 +325,11 @@ func (s *Server) extractSubdomain(host string) string {
 	if idx := strings.Index(host, ":"); idx >= 0 {
 		host = host[:idx]
 	}
-	if !strings.HasSuffix(host, s.cfg.Domain) {
+	domain := s.routingDomain()
+	if !strings.HasSuffix(host, domain) {
 		return ""
 	}
-	trimmed := strings.TrimSuffix(host, s.cfg.Domain)
+	trimmed := strings.TrimSuffix(host, domain)
 	trimmed = strings.TrimSuffix(trimmed, ".")
 	parts := strings.Split(trimmed, ".")
 	if len(parts) == 0 || parts[0] == "" {

@@ -18,18 +18,20 @@ import (
 )
 
 type serverOptions struct {
-	listen      string
-	domain      string
-	mode        string
-	tlsCert     string
-	tlsKey      string
-	trusted     []string
-	trustedHops int
-	authorized  string
-	state       string
-	autoReserve bool
-	adminSecret string
-	configPath  string
+	listen          string
+	domain          string
+	subdomainPrefix string
+	mode            string
+	tlsCert         string
+	tlsKey          string
+	trusted         []string
+	trustedHops     int
+	authorized      string
+	state           string
+	autoReserve     bool
+	allowRandom     bool
+	adminSecret     string
+	configPath      string
 }
 
 func newServerCommand(r *rootCommand) *cobra.Command {
@@ -43,6 +45,7 @@ func newServerCommand(r *rootCommand) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.listen, "listen", ":8080", "listener address")
 	cmd.Flags().StringVar(&opts.domain, "domain", "rempapps.site", "base domain")
+	cmd.Flags().StringVar(&opts.subdomainPrefix, "subdomain-prefix", "", "subdomain prefix (e.g. apps for *.apps.domain)")
 	cmd.Flags().StringVar(&opts.mode, "mode", string(server.ModeStandalone), "mode: standalone or behind-proxy")
 	cmd.Flags().StringVar(&opts.tlsCert, "tls-cert", "", "path to TLS certificate")
 	cmd.Flags().StringVar(&opts.tlsKey, "tls-key", "", "path to TLS private key")
@@ -51,6 +54,7 @@ func newServerCommand(r *rootCommand) *cobra.Command {
 	cmd.Flags().StringVar(&opts.authorized, "authorized", "", "authorized keys file")
 	cmd.Flags().StringVar(&opts.state, "state", defaultStatePath(), "path to SQLite state database")
 	cmd.Flags().BoolVar(&opts.autoReserve, "reserve", false, "auto-reserve subdomain on connect")
+	cmd.Flags().BoolVar(&opts.allowRandom, "allow-random", false, "allow clients to request random subdomains")
 	cmd.Flags().StringVar(&opts.adminSecret, "admin-secret", "", "shared secret for admin endpoints")
 	cmd.Flags().StringVar(&opts.configPath, "config", "", "YAML config file")
 	return cmd
@@ -127,17 +131,19 @@ func runServer(cmd *cobra.Command, r *rootCommand, opts *serverOptions) error {
 		return err
 	}
 	srv := server.New(server.Config{
-		Domain:         opts.domain,
-		Logger:         logger,
-		Authorizer:     authorizer,
-		Mode:           serverMode,
-		TLSCertFile:    opts.tlsCert,
-		TLSKeyFile:     opts.tlsKey,
-		TrustedProxies: trustedCIDRs,
-		TrustedHops:    opts.trustedHops,
-		AdminSecret:    adminSecret,
-		Store:          st,
-		AutoReserve:    opts.autoReserve,
+		Domain:          opts.domain,
+		SubdomainPrefix: opts.subdomainPrefix,
+		Logger:          logger,
+		Authorizer:      authorizer,
+		Mode:            serverMode,
+		TLSCertFile:     opts.tlsCert,
+		TLSKeyFile:      opts.tlsKey,
+		TrustedProxies:  trustedCIDRs,
+		TrustedHops:     opts.trustedHops,
+		AdminSecret:     adminSecret,
+		Store:           st,
+		AutoReserve:     opts.autoReserve,
+		AllowRandom:     opts.allowRandom,
 	})
 	err = srv.Run(ctx, opts.listen)
 	if st != nil {
@@ -156,6 +162,9 @@ func applyServerConfig(cmd *cobra.Command, opts *serverOptions, cfg *serverFileC
 	}
 	if cfg.Domain != "" && !flags.Changed("domain") {
 		opts.domain = cfg.Domain
+	}
+	if cfg.SubdomainPrefix != "" && !flags.Changed("subdomain-prefix") {
+		opts.subdomainPrefix = cfg.SubdomainPrefix
 	}
 	if cfg.Mode != "" && !flags.Changed("mode") {
 		opts.mode = cfg.Mode
@@ -180,6 +189,9 @@ func applyServerConfig(cmd *cobra.Command, opts *serverOptions, cfg *serverFileC
 	}
 	if cfg.AutoReserve != nil && !flags.Changed("reserve") {
 		opts.autoReserve = *cfg.AutoReserve
+	}
+	if cfg.AllowRandom != nil && !flags.Changed("allow-random") {
+		opts.allowRandom = *cfg.AllowRandom
 	}
 	if cfg.AdminSecret != "" && !flags.Changed("admin-secret") {
 		opts.adminSecret = cfg.AdminSecret

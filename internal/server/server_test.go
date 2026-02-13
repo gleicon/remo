@@ -406,3 +406,79 @@ func TestAuthorizerIntegration(t *testing.T) {
 	})
 	_ = srv
 }
+
+func TestExtractSubdomainWithPrefix(t *testing.T) {
+	srv := testServer(func(c *Config) {
+		c.SubdomainPrefix = "apps"
+	})
+	tests := []struct {
+		host     string
+		expected string
+	}{
+		{"foo.apps.rempapps.site", "foo"},
+		{"foo.apps.rempapps.site:443", "foo"},
+		{"bar.apps.rempapps.site", "bar"},
+		{"apps.rempapps.site", ""},
+		{"foo.rempapps.site", ""},
+		{"rempapps.site", ""},
+		{"other.example.com", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := srv.extractSubdomain(tt.host)
+		if got != tt.expected {
+			t.Errorf("extractSubdomain(%q) = %q, want %q", tt.host, got, tt.expected)
+		}
+	}
+}
+
+func TestRoutingDomain(t *testing.T) {
+	srv := testServer()
+	if got := srv.routingDomain(); got != "rempapps.site" {
+		t.Fatalf("expected rempapps.site, got %s", got)
+	}
+	srv2 := testServer(func(c *Config) {
+		c.SubdomainPrefix = "apps"
+	})
+	if got := srv2.routingDomain(); got != "apps.rempapps.site" {
+		t.Fatalf("expected apps.rempapps.site, got %s", got)
+	}
+}
+
+func TestGenerateRandomSubdomain(t *testing.T) {
+	seen := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		name, err := generateRandomSubdomain()
+		if err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+		if len(name) != 8 {
+			t.Fatalf("expected 8-char hex, got %q (len %d)", name, len(name))
+		}
+		if seen[name] {
+			t.Fatalf("duplicate random subdomain: %s", name)
+		}
+		seen[name] = true
+	}
+}
+
+func TestProxyWithSubdomainPrefix(t *testing.T) {
+	srv := testServer(func(c *Config) {
+		c.SubdomainPrefix = "apps"
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "foo.rempapps.site"
+	srv.handleProxy(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for non-prefix host, got %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "foo.apps.rempapps.site"
+	srv.handleProxy(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 (no tunnel), got %d", rec.Code)
+	}
+}

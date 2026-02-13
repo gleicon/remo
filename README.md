@@ -4,7 +4,83 @@ Single-binary reverse tunnel that exposes local services through public
 `*.rempapps.site` subdomains. Runs standalone with its own TLS or behind an
 existing nginx/reverse-proxy on your VPS.
 
-## Quick start (step by step)
+## Automated setup
+
+The `scripts/remo-setup.sh` script automates building, identity creation,
+certificate provisioning, and configuration. Run it from the repo root.
+
+**Client only (laptop):**
+
+```
+git clone https://github.com/gleicon/remo.git
+cd remo
+./scripts/remo-setup.sh client
+```
+
+This builds remo, creates `~/.remo/`, generates an ed25519 identity, and
+prints the public key you need to authorize on the server.
+
+**Standalone server (VPS):**
+
+```
+./scripts/remo-setup.sh server \
+  --domain rempapps.site \
+  --email you@example.com
+```
+
+This builds and installs the binary, generates identity and authorized keys
+under `~/.remo/`, runs certbot for a wildcard certificate via DNS-01, writes a
+YAML config to `~/.config/remo/server.yaml`, and creates a systemd unit.
+
+**Server behind nginx:**
+
+```
+./scripts/remo-setup.sh server \
+  --domain rempapps.site \
+  --email you@example.com \
+  --behind-proxy
+```
+
+Same as above plus an nginx server block with WebSocket upgrade headers.
+
+**Both on the same machine (dev/testing):**
+
+```
+./scripts/remo-setup.sh all \
+  --domain rempapps.site \
+  --email you@example.com \
+  --skip-certs
+```
+
+### Setup script options
+
+| Flag | Description |
+|------|-------------|
+| `--domain <domain>` | Base domain (required for server/all) |
+| `--email <email>` | Email for certbot (required unless `--skip-certs`) |
+| `--behind-proxy` | Use behind-proxy mode instead of standalone |
+| `--admin-secret <s>` | Admin secret (auto-generated if omitted) |
+| `--skip-certs` | Skip certbot certificate provisioning |
+| `--skip-build` | Skip building from source (use existing binary) |
+
+Environment variables `REMO_HOME` (default `~/.remo`) and `REMO_CONFIG_DIR`
+(default `~/.config/remo`) control where files are stored.
+
+### What the script creates
+
+| Path | Purpose |
+|------|---------|
+| `~/.remo/identity.json` | Client ed25519 keypair |
+| `~/.remo/authorized.keys` | Server allowlist (seeded from local identity) |
+| `~/.config/remo/server.yaml` | Server configuration |
+| `~/.config/remo/state.db` | SQLite state database |
+| `/etc/remo/fullchain.pem` | TLS certificate (via certbot) |
+| `/etc/remo/privkey.pem` | TLS private key (via certbot) |
+| `/usr/local/bin/remo` | Installed binary |
+| `/etc/systemd/system/remo.service` | Systemd service unit |
+| `/etc/nginx/sites-available/remo-*.conf` | Nginx vhost (behind-proxy only) |
+
+## Manual setup (step by step)
 
 ### 1. Build
 
@@ -31,13 +107,14 @@ you will need it for step 3.
 Create an authorized-keys file containing the public key from step 2:
 
 ```
-echo '<BASE64_PUBLIC_KEY>' > /tmp/authorized.keys
+mkdir -p ~/.remo
+echo '<BASE64_PUBLIC_KEY>' > ~/.remo/authorized.keys
 ```
 
 You can restrict which subdomains a key may claim by appending a rule:
 
 ```
-echo '<BASE64_PUBLIC_KEY> demo-*' > /tmp/authorized.keys
+echo '<BASE64_PUBLIC_KEY> demo-*' > ~/.remo/authorized.keys
 ```
 
 When the server starts with `--state`, entries from this file are imported into
@@ -90,7 +167,7 @@ sudo certbot renew --deploy-hook \
   -mode standalone \
   -tls-cert /etc/remo/fullchain.pem \
   -tls-key /etc/remo/privkey.pem \
-  -authorized /tmp/authorized.keys \
+  -authorized ~/.remo/authorized.keys \
   -state ~/.config/remo/state.db \
   -reserve \
   -admin-secret changeme
@@ -105,7 +182,7 @@ sudo certbot renew --deploy-hook \
   -mode behind-proxy \
   -trusted-proxy 127.0.0.1/32 \
   -trusted-hops 1 \
-  -authorized /tmp/authorized.keys \
+  -authorized ~/.remo/authorized.keys \
   -state ~/.config/remo/state.db \
   -admin-secret changeme
 ```
@@ -132,7 +209,49 @@ server {
 }
 ```
 
-### 7. Connect from your laptop
+### 7. Run as a service (systemd)
+
+To keep remo running across reboots and recover from crashes, install it as a
+systemd service. The setup script (`scripts/remo-setup.sh server`) creates this
+unit automatically. To do it manually:
+
+```
+sudo tee /etc/systemd/system/remo.service > /dev/null <<'EOF'
+[Unit]
+Description=Remo reverse tunnel server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/remo server --config /home/you/.config/remo/server.yaml
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+Enable and start:
+
+```
+sudo systemctl daemon-reload
+sudo systemctl enable --now remo
+```
+
+Common commands:
+
+```bash
+sudo systemctl status remo        # check status
+sudo systemctl restart remo       # restart (e.g. after cert renewal)
+sudo systemctl stop remo          # stop
+sudo journalctl -u remo -f        # follow logs
+sudo journalctl -u remo --since "1 hour ago"  # recent logs
+```
+
+### 8. Connect from your laptop
 
 ```
 ./remo connect \
@@ -146,7 +265,7 @@ Your local port 3000 is now reachable at `https://demo.rempapps.site`.
 
 Add `-tui` for a live top-like request log in your terminal.
 
-### 8. Verify
+### 9. Verify
 
 ```
 curl https://demo.rempapps.site/
@@ -166,8 +285,8 @@ python3 -m http.server 3000
 
 # Terminal 2 — start the server in behind-proxy mode (plain HTTP)
 ./remo server -listen 127.0.0.1:8080 -domain rempapps.site \
-  -mode behind-proxy -authorized /tmp/authorized.keys \
-  -state /tmp/remo-state.db -admin-secret dev
+  -mode behind-proxy -authorized ~/.remo/authorized.keys \
+  -state ~/.config/remo/state.db -admin-secret dev
 
 # Terminal 3 — connect
 ./remo connect -server http://127.0.0.1:8080 -subdomain demo \
@@ -191,10 +310,70 @@ tls_key: /etc/remo/privkey.pem
 trusted_proxies:
   - 127.0.0.1/32
 trusted_hops: 1
-authorized: /tmp/authorized.keys
-state: /home/you/.config/remo/state.db
+authorized: ~/.remo/authorized.keys
+state: ~/.config/remo/state.db
 reserve: true
+allow_random: true
 admin_secret: changeme
+```
+
+## Random subdomains
+
+When the server is started with `--allow-random` (or `allow_random: true` in
+YAML), clients can omit `-subdomain` to get a random 8-character hex name
+assigned automatically (e.g. `a3f9c2b1.rempapps.site`):
+
+```bash
+# Server
+./remo server ... --allow-random
+
+# Client — no -subdomain flag
+./remo connect \
+  -server https://rempapps.site \
+  -upstream http://127.0.0.1:3000 \
+  -identity ~/.remo/identity.json
+```
+
+The server generates the random name, registers the tunnel, and returns the
+assigned subdomain in the handshake response. The client logs it so you know
+where to reach your service. This is useful for throwaway tunnels where you
+don't need a stable name.
+
+Named subdomains still work the same way — pass `-subdomain myapp` to claim a
+specific name. Combine with `--reserve` to lock it to your key.
+
+## Sub-subdomain routing
+
+By default, tunnels are routed under `*.rempapps.site`. To use a sub-subdomain
+prefix (e.g. `*.apps.rempapps.site`), pass `--subdomain-prefix`:
+
+```bash
+./remo server ... --subdomain-prefix apps
+```
+
+Or in YAML:
+
+```yaml
+subdomain_prefix: apps
+```
+
+With this configuration:
+- Tunnel URLs become `https://demo.apps.rempapps.site`
+- The apex domain (`rempapps.site`) is free for a landing page or other services
+- DNS must cover `*.apps.rempapps.site` (wildcard A record + cert)
+
+DNS setup:
+
+```
+*.apps.rempapps.site.  A  <VPS_IP>
+```
+
+Certbot:
+
+```
+sudo certbot certonly --manual --preferred-challenges dns \
+  --email you@example.com \
+  -d apps.rempapps.site -d '*.apps.rempapps.site'
 ```
 
 ## TUI controls (`remo connect --tui`)

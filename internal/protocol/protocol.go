@@ -37,7 +37,8 @@ type HelloPayload struct {
 }
 
 type ReadyPayload struct {
-	Message string `json:"message"`
+	Message   string `json:"message"`
+	Subdomain string `json:"subdomain,omitempty"`
 }
 
 type RequestPayload struct {

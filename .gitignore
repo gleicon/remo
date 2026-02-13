@@ -1,5 +1,6 @@
 # Binary
 ./remo
+build/*
 remo.exe
 dist/
 

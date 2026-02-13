@@ -77,6 +77,27 @@ func TestEnvelopeMarshalReady(t *testing.T) {
 	if decoded.Ready == nil || decoded.Ready.Message != "ready" {
 		t.Fatal("ready payload mismatch")
 	}
+	if decoded.Ready.Subdomain != "" {
+		t.Fatalf("expected empty subdomain, got %s", decoded.Ready.Subdomain)
+	}
+}
+
+func TestEnvelopeMarshalReadyWithSubdomain(t *testing.T) {
+	env := &Envelope{
+		Type:  TypeReady,
+		Ready: &ReadyPayload{Message: "ready", Subdomain: "abc12345"},
+	}
+	data, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded Envelope
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Ready.Subdomain != "abc12345" {
+		t.Fatalf("expected abc12345, got %s", decoded.Ready.Subdomain)
+	}
 }
 
 func TestEnvelopeMarshalRequest(t *testing.T) {
