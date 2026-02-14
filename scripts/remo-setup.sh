@@ -4,9 +4,9 @@
 #
 # Usage:
 #   ./scripts/remo-setup.sh client
-#   ./scripts/remo-setup.sh server  --domain rempapps.site --email you@example.com
-#   ./scripts/remo-setup.sh server  --domain rempapps.site --email you@example.com --behind-proxy
-#   ./scripts/remo-setup.sh all     --domain rempapps.site --email you@example.com
+#   ./scripts/remo-setup.sh server  --domain yourdomain.tls --email you@example.com
+#   ./scripts/remo-setup.sh server  --domain yourdomain.tls --email you@example.com --behind-proxy
+#   ./scripts/remo-setup.sh all     --domain yourdomain.tls --email you@example.com
 #
 set -euo pipefail
 
@@ -64,13 +64,13 @@ Examples:
   ./scripts/remo-setup.sh client
 
   # Standalone server (VPS)
-  ./scripts/remo-setup.sh server --domain rempapps.site --email you@example.com
+  ./scripts/remo-setup.sh server --domain yourdomain.tls --email you@example.com
 
   # Server behind nginx
-  ./scripts/remo-setup.sh server --domain rempapps.site --email you@example.com --behind-proxy
+  ./scripts/remo-setup.sh server --domain yourdomain.tld --email you@example.com --behind-proxy
 
   # Both on same machine (dev/testing)
-  ./scripts/remo-setup.sh all --domain rempapps.site --email you@example.com --skip-certs
+  ./scripts/remo-setup.sh all --domain yourdomain.tld --email you@example.com --skip-certs
 EOF
     exit 0
 }
