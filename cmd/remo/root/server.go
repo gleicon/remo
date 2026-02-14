@@ -31,6 +31,7 @@ type serverOptions struct {
 	autoReserve     bool
 	allowRandom     bool
 	adminSecret     string
+	sshHostKey      string
 	configPath      string
 }
 
@@ -56,6 +57,7 @@ func newServerCommand(r *rootCommand) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.autoReserve, "reserve", false, "auto-reserve subdomain on connect")
 	cmd.Flags().BoolVar(&opts.allowRandom, "allow-random", false, "allow clients to request random subdomains")
 	cmd.Flags().StringVar(&opts.adminSecret, "admin-secret", "", "shared secret for admin endpoints")
+	cmd.Flags().StringVar(&opts.sshHostKey, "ssh-host-key", "", "SSH host key file (required for SSH server)")
 	cmd.Flags().StringVar(&opts.configPath, "config", "", "YAML config file")
 	return cmd
 }
@@ -144,6 +146,7 @@ func runServer(cmd *cobra.Command, r *rootCommand, opts *serverOptions) error {
 		Store:           st,
 		AutoReserve:     opts.autoReserve,
 		AllowRandom:     opts.allowRandom,
+		SSHHostKey:      opts.sshHostKey,
 	})
 	err = srv.Run(ctx, opts.listen)
 	if st != nil {
@@ -195,6 +198,9 @@ func applyServerConfig(cmd *cobra.Command, opts *serverOptions, cfg *serverFileC
 	}
 	if cfg.AdminSecret != "" && !flags.Changed("admin-secret") {
 		opts.adminSecret = cfg.AdminSecret
+	}
+	if cfg.SSHHostKey != "" && !flags.Changed("ssh-host-key") {
+		opts.sshHostKey = cfg.SSHHostKey
 	}
 }
 

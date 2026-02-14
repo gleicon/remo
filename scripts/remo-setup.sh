@@ -4,27 +4,31 @@
 #
 # Usage:
 #   ./scripts/remo-setup.sh client
-#   ./scripts/remo-setup.sh server  --domain yourdomain.tls --email you@example.com
-#   ./scripts/remo-setup.sh server  --domain yourdomain.tls --email you@example.com --behind-proxy
-#   ./scripts/remo-setup.sh all     --domain yourdomain.tls --email you@example.com
+#   ./scripts/remo-setup.sh server  --domain yourdomain.tld --email you@example.com
+#   ./scripts/remo-setup.sh server  --domain yourdomain.tld --email you@example.com --behind-proxy
+#   ./scripts/remo-setup.sh all     --domain yourdomain.tld --email you@example.com
 #
 set -euo pipefail
 
+# Default paths - server uses /etc and /var, client uses $HOME
 REMO_HOME="${REMO_HOME:-$HOME/.remo}"
-REMO_CONFIG_DIR="${REMO_CONFIG_DIR:-$HOME/.config/remo}"
-REMO_CERT_DIR="/etc/remo"
+REMO_CONFIG_DIR="${REMO_CONFIG_DIR:-/etc/remo}"
+REMO_CERT_DIR="${REMO_CERT_DIR:-/etc/remo}"
+REMO_VAR_DIR="${REMO_VAR_DIR:-/var/lib/remo}"
 REMO_BIN="/usr/local/bin/remo"
 REMO_IDENTITY="$REMO_HOME/identity.json"
-REMO_AUTHORIZED="$REMO_HOME/authorized.keys"
-REMO_STATE="$REMO_CONFIG_DIR/state.db"
+REMO_AUTHORIZED="$REMO_CONFIG_DIR/authorized.keys"
+REMO_STATE="$REMO_VAR_DIR/state.db"
 REMO_SERVER_CONFIG="$REMO_CONFIG_DIR/server.yaml"
+REMO_SSH_HOST_KEY="$REMO_CONFIG_DIR/host_key"
 
 DOMAIN=""
 EMAIL=""
 MODE="standalone"
 ADMIN_SECRET=""
+SSH_USER=""
+SSH_PORT="22"
 SKIP_CERTS=false
-SKIP_BUILD=false
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -42,29 +46,33 @@ usage() {
 Usage: remo-setup.sh <command> [options]
 
 Commands:
-  client                Set up the remo client (identity + directories)
-  server                Set up the remo server (certs, config, authorized keys)
+  client                Set up remo client (identity + directories)
+  server                Set up remo server (certs, config, authorized keys)
   all                   Set up both client and server on this machine
 
 Options:
   --domain <domain>     Base domain (required for server/all)
-  --email <email>       Email for certbot (required for server/all unless --skip-certs)
-  --behind-proxy        Use behind-proxy mode instead of standalone
-  --admin-secret <s>    Admin secret (auto-generated if omitted)
-  --skip-certs          Skip certbot certificate provisioning
-  --skip-build          Skip building from source (assume remo is already installed)
-  -h, --help            Show this help
+  --email <email>      Email for certbot (required for server/all unless --skip-certs)
+  --behind-proxy       Use behind-proxy mode instead of standalone
+  --admin-secret <s>   Admin secret (auto-generated if omitted)
+  --skip-certs         Skip certbot certificate provisioning
+  -h, --help           Show this help
 
-Environment:
-  REMO_HOME             Base directory for remo files (default: ~/.remo)
-  REMO_CONFIG_DIR       Config directory (default: ~/.config/remo)
+File Locations:
+  /etc/remo/server.yaml        Server configuration
+  /etc/remo/authorized.keys    Authorized client keys
+  /etc/remo/host_key          SSH host key
+  /etc/remo/fullchain.pem     TLS certificate
+  /etc/remo/privkey.pem       TLS private key
+  /var/lib/remo/state.db      SQLite database
+  ~/.remo/identity.json        Client identity
 
 Examples:
   # Client only (laptop)
   ./scripts/remo-setup.sh client
 
   # Standalone server (VPS)
-  ./scripts/remo-setup.sh server --domain yourdomain.tls --email you@example.com
+  ./scripts/remo-setup.sh server --domain yourdomain.tld --email you@example.com
 
   # Server behind nginx
   ./scripts/remo-setup.sh server --domain yourdomain.tld --email you@example.com --behind-proxy
@@ -81,57 +89,78 @@ check_command() {
 
 ensure_directories() {
     info "Creating directories"
+    mkdir -p "$REMO_CONFIG_DIR"
+    chmod 755 "$REMO_CONFIG_DIR"
+    mkdir -p "$REMO_VAR_DIR"
+    chmod 755 "$REMO_VAR_DIR"
     mkdir -p "$REMO_HOME"
     chmod 700 "$REMO_HOME"
-    mkdir -p "$REMO_CONFIG_DIR"
-    chmod 700 "$REMO_CONFIG_DIR"
 }
 
-build_remo() {
-    if [ "$SKIP_BUILD" = true ]; then
-        if ! check_command remo && [ ! -f ./remo ]; then
-            die "remo binary not found. Remove --skip-build or install remo first."
-        fi
-        info "Skipping build (--skip-build)"
+generate_ssh_host_key() {
+    if [ -f "$REMO_SSH_HOST_KEY" ]; then
+        info "SSH host key already exists: $REMO_SSH_HOST_KEY"
         return
     fi
-
-    if [ -f ./Makefile ] && [ -f ./go.mod ]; then
-        info "Building remo from source"
-        check_command go || die "Go is required to build remo. Install from https://go.dev/dl/"
-        make build
-        info "Build complete: ./remo"
-    elif check_command remo; then
-        info "Using existing remo binary: $(command -v remo)"
-    elif [ -f ./remo ]; then
-        info "Using existing remo binary: ./remo"
-    else
-        die "No remo source tree or binary found. Run this script from the remo repo root."
-    fi
+    info "Generating SSH host key"
+    ssh-keygen -t ed25519 -f "$REMO_SSH_HOST_KEY" -N "" -C "remo@$(hostname)"
+    chmod 600 "$REMO_SSH_HOST_KEY"
+    info "SSH host key generated: $REMO_SSH_HOST_KEY.pub"
 }
 
-remo_cmd() {
-    if [ -f ./remo ]; then
-        ./remo "$@"
-    elif check_command remo; then
-        remo "$@"
-    else
-        die "remo binary not found"
+install_remo_binary() {
+    local arch
+    local os
+    
+    case "$(uname -m)" in
+        x86_64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) die "Unsupported architecture: $(uname -m)" ;;
+    esac
+    
+    case "$(uname -s)" in
+        Linux) os="linux" ;;
+        Darwin) os="darwin" ;;
+        *) die "Unsupported OS: $(uname -s)" ;;
+    esac
+    
+    local version
+    version=$(curl -sL https://api.github.com/repos/gleicon/remo/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+    
+    if [ -z "$version" ]; then
+        die "Failed to get latest release version"
     fi
-}
-
-install_binary() {
-    if [ -f ./remo ] && [ "$(id -u)" = "0" ]; then
-        info "Installing remo to $REMO_BIN"
-        cp ./remo "$REMO_BIN"
+    
+    local filename="remo_${version}_${os}_${arch}"
+    
+    if [ "$os" = "darwin" ]; then
+        filename="${filename}.tar.gz"
+    else
+        filename="${filename}.tar.gz"
+    fi
+    
+    local url="https://github.com/gleicon/remo/releases/download/v${version}/${filename}"
+    
+    info "Downloading remo ${version} for ${os}/${arch}"
+    
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap "rm -rf $tmpdir" EXIT
+    
+    curl -sL "$url" -o "$tmpdir/remo.tar.gz"
+    tar -xzf "$tmpdir/remo.tar.gz" -C "$tmpdir"
+    
+    if [ "$(id -u)" = "0" ]; then
+        cp "$tmpdir/remo" "$REMO_BIN"
         chmod 755 "$REMO_BIN"
-    elif [ -f ./remo ] && check_command sudo; then
-        info "Installing remo to $REMO_BIN (requires sudo)"
-        sudo cp ./remo "$REMO_BIN"
-        sudo chmod 755 "$REMO_BIN"
     else
-        warn "Skipping install to $REMO_BIN (run as root or copy manually)"
+        warn "Not running as root, installing to current directory instead"
+        cp "$tmpdir/remo" "./remo"
+        chmod 755 "./remo"
+        REMO_BIN="$(pwd)/remo"
     fi
+    
+    info "Installed remo to $REMO_BIN"
 }
 
 setup_identity() {
@@ -139,7 +168,7 @@ setup_identity() {
         info "Identity already exists: $REMO_IDENTITY"
     else
         info "Generating client identity"
-        remo_cmd auth init -out "$REMO_IDENTITY"
+        "$REMO_BIN" auth init -out "$REMO_IDENTITY"
         info "Identity created: $REMO_IDENTITY"
     fi
 
@@ -148,8 +177,8 @@ setup_identity() {
         PUBKEY=$(jq -r .public "$REMO_IDENTITY" 2>/dev/null || true)
     fi
     if [ -n "$PUBKEY" ]; then
-        printf "\n${BOLD}Public key:${NC} %s\n" "$PUBKEY"
-        printf "Use this key to authorize the client on the server.\n\n"
+        printf "\n${BOLD}Your public key:${NC} %s\n" "$PUBKEY"
+        printf "Add this to the server's %s\n\n" "$REMO_AUTHORIZED"
     fi
 }
 
@@ -184,7 +213,7 @@ generate_admin_secret() {
         return
     fi
     ADMIN_SECRET=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
-    info "Generated admin secret (save this): $ADMIN_SECRET"
+    info "Generated admin secret: $ADMIN_SECRET"
 }
 
 setup_certs() {
@@ -245,6 +274,7 @@ write_server_config() {
 listen: "127.0.0.1:18080"
 domain: "$DOMAIN"
 mode: behind-proxy
+ssh_host_key: "$REMO_SSH_HOST_KEY"
 trusted_proxies:
   - "127.0.0.1/32"
 trusted_hops: 1
@@ -258,6 +288,7 @@ YAML
 listen: ":443"
 domain: "$DOMAIN"
 mode: standalone
+ssh_host_key: "$REMO_SSH_HOST_KEY"
 tls_cert: "$REMO_CERT_DIR/fullchain.pem"
 tls_key: "$REMO_CERT_DIR/privkey.pem"
 authorized: "$REMO_AUTHORIZED"
@@ -293,9 +324,6 @@ server {
         proxy_set_header Host              \$host;
         proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade    \$http_upgrade;
-        proxy_set_header Connection "upgrade";
     }
 }
 NGINX
@@ -319,9 +347,6 @@ write_systemd_unit() {
         return
     fi
 
-    local bin="$REMO_BIN"
-    [ -f "$bin" ] || bin="$(pwd)/remo"
-
     info "Writing systemd unit: $unit"
     sudo tee "$unit" > /dev/null <<UNIT
 [Unit]
@@ -331,10 +356,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$bin server --config $REMO_SERVER_CONFIG
+ExecStart=$REMO_BIN server --config $REMO_SERVER_CONFIG
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
@@ -345,6 +371,11 @@ UNIT
 }
 
 print_client_summary() {
+    local ssh_target="${SSH_USER:-$(whoami)}@<SERVER>"
+    if [ -n "$DOMAIN" ]; then
+        ssh_target="${SSH_USER:-$(whoami)}@$DOMAIN"
+    fi
+
     echo ""
     printf "${GREEN}${BOLD}=== Client setup complete ===${NC}\n"
     echo ""
@@ -352,11 +383,13 @@ print_client_summary() {
     echo ""
     echo "  Connect to a server:"
     echo "    remo connect \\"
-    echo "      -server https://<DOMAIN> \\"
-    echo "      -subdomain <NAME> \\"
-    echo "      -upstream http://127.0.0.1:<PORT> \\"
-    echo "      -identity $REMO_IDENTITY \\"
-    echo "      -tui"
+    echo "      --server $ssh_target \\"
+    echo "      --subdomain myapp \\"
+    echo "      --upstream http://127.0.0.1:3000 \\"
+    echo "      -i $REMO_IDENTITY"
+    echo ""
+    echo "  Or with TUI:"
+    echo "    remo connect --server $ssh_target --subdomain myapp --upstream http://127.0.0.1:3000 -i $REMO_IDENTITY --tui"
     echo ""
 }
 
@@ -367,6 +400,7 @@ print_server_summary() {
     echo "  Config:          $REMO_SERVER_CONFIG"
     echo "  Authorized keys: $REMO_AUTHORIZED"
     echo "  State DB:        $REMO_STATE"
+    echo "  SSH host key:   $REMO_SSH_HOST_KEY"
     echo "  Admin secret:    $ADMIN_SECRET"
     echo ""
     if [ "$MODE" = "behind-proxy" ]; then
@@ -393,7 +427,7 @@ print_server_summary() {
 
 do_client() {
     ensure_directories
-    build_remo
+    install_remo_binary
     setup_identity
     print_client_summary
 }
@@ -402,8 +436,8 @@ do_server() {
     [ -n "$DOMAIN" ] || die "--domain is required for server setup"
 
     ensure_directories
-    build_remo
-    install_binary
+    generate_ssh_host_key
+    install_remo_binary
     setup_identity
     setup_authorized_keys
     setup_certs
@@ -417,8 +451,8 @@ do_all() {
     [ -n "$DOMAIN" ] || die "--domain is required"
 
     ensure_directories
-    build_remo
-    install_binary
+    generate_ssh_host_key
+    install_remo_binary
     setup_identity
     setup_authorized_keys
     setup_certs
@@ -440,7 +474,6 @@ while [ $# -gt 0 ]; do
         --behind-proxy) MODE="behind-proxy"; shift ;;
         --admin-secret) ADMIN_SECRET="$2"; shift 2 ;;
         --skip-certs)   SKIP_CERTS=true;   shift ;;
-        --skip-build)   SKIP_BUILD=true;   shift ;;
         -h|--help)      usage ;;
         *)              die "Unknown option: $1" ;;
     esac

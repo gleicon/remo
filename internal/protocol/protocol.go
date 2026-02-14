@@ -2,11 +2,11 @@ package protocol
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"io"
 	"time"
-
-	"nhooyr.io/websocket"
 )
 
 const (
@@ -18,7 +18,8 @@ const (
 	MaxBodyBytes = 1 << 20
 )
 
-// Envelope is the framing structure exchanged between server and client.
+const ProxyChannelType = "remo-proxy"
+
 type Envelope struct {
 	Type     string            `json:"type"`
 	Hello    *HelloPayload     `json:"hello,omitempty"`
@@ -56,31 +57,96 @@ type ResponsePayload struct {
 	Body    []byte              `json:"body"`
 }
 
-// Write sends the envelope using JSON text frames.
-func Write(ctx context.Context, conn *websocket.Conn, env *Envelope) error {
+type ReadWriter interface {
+	io.ReadWriteCloser
+}
+
+func Write(ctx context.Context, rw ReadWriter, env *Envelope) error {
 	bytes, err := json.Marshal(env)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	return conn.Write(ctx, websocket.MessageText, bytes)
+	if len(bytes) > MaxBodyBytes {
+		return errors.New("message too large")
+	}
+	sizeBuf := make([]byte, 4)
+	binary.BigEndian.PutUint32(sizeBuf, uint32(len(bytes)))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := rw.Write(sizeBuf)
+		if err != nil {
+			done <- err
+			return
+		}
+		_, err = rw.Write(bytes)
+		done <- err
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
 }
 
-// Read retrieves an envelope from the peer.
-func Read(ctx context.Context, conn *websocket.Conn) (*Envelope, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	typ, data, err := conn.Read(ctx)
-	if err != nil {
-		return nil, err
+func Read(ctx context.Context, rw ReadWriter) (*Envelope, error) {
+	header := make([]byte, 4)
+	done := make(chan error, 1)
+	var n int
+	go func() {
+		var err error
+		n, err = rw.Read(header)
+		done <- err
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case err := <-done:
+		if err != nil {
+			return nil, err
+		}
 	}
-	if typ != websocket.MessageText {
-		return nil, errors.New("unexpected frame type")
+	if n < 4 {
+		return nil, errors.New("incomplete header")
+	}
+	size := int(binary.BigEndian.Uint32(header))
+	if size > MaxBodyBytes {
+		return nil, errors.New("message too large")
+	}
+	data := make([]byte, size)
+	readDone := make(chan error, 1)
+	go func() {
+		var err error
+		_, err = io.ReadFull(rw, data)
+		readDone <- err
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case err := <-readDone:
+		if err != nil {
+			return nil, err
+		}
 	}
 	var env Envelope
 	if err := json.Unmarshal(data, &env); err != nil {
 		return nil, err
 	}
 	return &env, nil
+}
+
+func ReadRequest(ctx context.Context, rw ReadWriter) (*Envelope, error) {
+	return Read(ctx, rw)
+}
+
+func WriteResponse(ctx context.Context, rw ReadWriter, env *Envelope) error {
+	return Write(ctx, rw, env)
+}
+
+func SetReadDeadline(rw io.Reader, t time.Time) error {
+	if rd, ok := rw.(interface{ SetReadDeadline(time.Time) error }); ok {
+		return rd.SetReadDeadline(t)
+	}
+	return nil
 }

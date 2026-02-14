@@ -13,13 +13,15 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/gliderlabs/ssh"
 	"github.com/rs/zerolog"
-	"nhooyr.io/websocket"
+	xssh "golang.org/x/crypto/ssh"
 
 	"github.com/gleicon/remo/internal/auth"
 	"github.com/gleicon/remo/internal/protocol"
@@ -48,6 +50,7 @@ type Config struct {
 	Store           *store.Store
 	AutoReserve     bool
 	AllowRandom     bool
+	SSHHostKey      string
 }
 
 type Server struct {
@@ -69,6 +72,9 @@ func New(cfg Config) *Server {
 	if cfg.TrustedHops == 0 {
 		cfg.TrustedHops = 1
 	}
+	if cfg.SSHHostKey == "" {
+		cfg.SSHHostKey = "0.0.0.0:22"
+	}
 	return &Server{cfg: cfg, log: cfg.Logger, registry: newRegistry(), store: cfg.Store, started: time.Now(), metrics: newMetrics()}
 }
 
@@ -89,7 +95,6 @@ func generateRandomSubdomain() (string, error) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/tunnel", s.handleTunnel)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/metrics", s.handleMetrics)
@@ -103,139 +108,275 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: s.cfg.ReadTimeout,
 	}
+
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
-	var err error
-	switch s.cfg.Mode {
-	case ModeStandalone:
-		if s.cfg.TLSCertFile == "" || s.cfg.TLSKeyFile == "" {
-			return errors.New("standalone mode requires tls cert and key")
+
+	errChan := make(chan error, 2)
+
+	go func() {
+		errChan <- s.runSSHServer(ctx)
+	}()
+
+	go func() {
+		switch s.cfg.Mode {
+		case ModeStandalone:
+			if s.cfg.TLSCertFile == "" || s.cfg.TLSKeyFile == "" {
+				errChan <- errors.New("standalone mode requires tls cert and key")
+				return
+			}
+			errChan <- httpServer.ListenAndServeTLS(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+		default:
+			errChan <- httpServer.ListenAndServe()
 		}
-		err = httpServer.ListenAndServeTLS(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
-	default:
-		err = httpServer.ListenAndServe()
-	}
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+	}()
+
+	var err error
+	select {
+	case <-ctx.Done():
+		return nil
+	case err = <-errChan:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
 	}
 	return nil
 }
 
-func (s *Server) HasTunnel(subdomain string) bool {
-	return s.registry.has(subdomain)
-}
+func (s *Server) runSSHServer(ctx context.Context) error {
+	if s.cfg.SSHHostKey == "" {
+		return errors.New("ssh-host-key is required")
+	}
 
-func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, nil)
+	hostKeyData, err := os.ReadFile(s.cfg.SSHHostKey)
 	if err != nil {
-		s.log.Error().Err(err).Msg("websocket accept failed")
-		return
+		return fmt.Errorf("read SSH host key: %w", err)
 	}
-	subdomain, _, pubKeyStr, err := s.performHandshake(r.Context(), conn)
+
+	hostKey, err := xssh.ParsePrivateKey(hostKeyData)
 	if err != nil {
-		conn.Close(websocket.StatusPolicyViolation, err.Error())
-		return
+		return fmt.Errorf("parse SSH host key: %w", err)
 	}
-	log := s.log.With().Str("subdomain", subdomain).Str("pubkey", pubKeyStr).Logger()
-	tunnel := newTunnel(subdomain, pubKeyStr, conn, log)
-	if !s.registry.register(subdomain, tunnel) {
-		conn.Close(websocket.StatusPolicyViolation, "subdomain busy")
-		return
+
+	sshServer := &ssh.Server{
+		Addr:    ":22",
+		Handler: s.handleSSH,
 	}
-	log.Info().Msg("tunnel connected")
-	ctx, cancel := context.WithCancel(context.Background())
+	sshServer.AddHostKey(hostKey)
+	sshServer.SetOption(ssh.PublicKeyAuth(s.handlePublicKeyAuth))
+
+	errChan := make(chan error, 1)
 	go func() {
-		defer cancel()
-		tunnel.runReader(ctx)
+		errChan <- sshServer.ListenAndServe()
 	}()
-	go tunnel.keepalive(ctx)
-	<-ctx.Done()
-	s.registry.unregister(subdomain, tunnel)
-	if s.store != nil {
-		s.store.LogEvent(context.Background(), "disconnect", subdomain, pubKeyStr)
+
+	select {
+	case <-ctx.Done():
+		return sshServer.Shutdown(context.Background())
+	case err := <-errChan:
+		return err
 	}
 }
 
-func (s *Server) performHandshake(parent context.Context, conn *websocket.Conn) (string, ed25519.PublicKey, string, error) {
-	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+func (s *Server) handlePublicKeyAuth(ctx ssh.Context, key ssh.PublicKey) bool {
+	pubKeyStr := base64.StdEncoding.EncodeToString(key.Marshal())
+	s.log.Debug().Str("pubkey", pubKeyStr).Str("client", ctx.ClientVersion()).Msg("public key auth attempt")
+
+	if s.cfg.Authorizer != nil {
+		pub := ed25519.PublicKey(key.Marshal())
+		if !s.cfg.Authorizer.Allow(pub, "") {
+			s.log.Warn().Str("pubkey", pubKeyStr).Msg("public key not authorized")
+			return false
+		}
+	}
+
+	ctx.SetValue("pubkey", pubKeyStr)
+	return true
+}
+
+func (s *Server) handleSSH(session ssh.Session) {
+	ctx := context.Background()
+	pubKeyStr, _ := session.Context().Value("pubkey").(string)
+
+	s.log.Info().Str("client", session.RemoteAddr().String()).Msg("new SSH connection")
+
+	// Session implements io.ReadWriteCloser - use it directly as the channel
+	channel := session
+
+	helloCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	env, err := protocol.Read(ctx, conn)
+
+	env, err := protocol.Read(helloCtx, channel)
 	if err != nil {
-		return "", nil, "", err
+		s.log.Error().Err(err).Msg("failed to read hello from client")
+		return
 	}
 	if env.Type != protocol.TypeHello || env.Hello == nil {
-		return "", nil, "", errors.New("invalid handshake")
+		s.log.Error().Msg("invalid hello message")
+		return
 	}
+
 	payload := env.Hello
-	randomAssigned := false
 	originalSubdomain := payload.Subdomain
+	randomAssigned := false
+
 	if payload.Subdomain == "" {
 		if !s.cfg.AllowRandom {
-			return "", nil, "", errors.New("missing subdomain (random not enabled)")
+			protocol.Write(ctx, channel, &protocol.Envelope{
+				Type:  protocol.TypeError,
+				Error: "missing subdomain (random not enabled)",
+			})
+			return
 		}
 		randomAssigned = true
 	}
+
 	if !auth.FreshTimestamp(payload.Timestamp) {
-		return "", nil, "", errors.New("stale handshake")
+		protocol.Write(ctx, channel, &protocol.Envelope{
+			Type:  protocol.TypeError,
+			Error: "stale handshake",
+		})
+		return
 	}
+
 	pubBytes, err := base64.StdEncoding.DecodeString(payload.PublicKey)
 	if err != nil {
-		return "", nil, "", errors.New("invalid public key")
+		protocol.Write(ctx, channel, &protocol.Envelope{
+			Type:  protocol.TypeError,
+			Error: "invalid public key",
+		})
+		return
 	}
 	if len(pubBytes) != ed25519.PublicKeySize {
-		return "", nil, "", errors.New("invalid public key size")
+		protocol.Write(ctx, channel, &protocol.Envelope{
+			Type:  protocol.TypeError,
+			Error: "invalid public key size",
+		})
+		return
 	}
+
 	sigBytes, err := base64.StdEncoding.DecodeString(payload.Signature)
 	if err != nil {
-		return "", nil, "", errors.New("invalid signature")
+		protocol.Write(ctx, channel, &protocol.Envelope{
+			Type:  protocol.TypeError,
+			Error: "invalid signature",
+		})
+		return
 	}
+
 	pub := ed25519.PublicKey(pubBytes)
 	message := auth.BuildHandshakeMessage(originalSubdomain, payload.Timestamp)
 	if !ed25519.Verify(pub, message, sigBytes) {
-		return "", nil, "", errors.New("signature mismatch")
+		protocol.Write(ctx, channel, &protocol.Envelope{
+			Type:  protocol.TypeError,
+			Error: "signature mismatch",
+		})
+		return
 	}
+
 	if randomAssigned {
 		name, err := generateRandomSubdomain()
 		if err != nil {
-			return "", nil, "", errors.New("failed to generate subdomain")
+			protocol.Write(ctx, channel, &protocol.Envelope{
+				Type:  protocol.TypeError,
+				Error: "failed to generate subdomain",
+			})
+			return
 		}
 		for s.registry.has(name) {
 			name, err = generateRandomSubdomain()
 			if err != nil {
-				return "", nil, "", errors.New("failed to generate subdomain")
+				protocol.Write(ctx, channel, &protocol.Envelope{
+					Type:  protocol.TypeError,
+					Error: "failed to generate subdomain",
+				})
+				return
 			}
 		}
 		payload.Subdomain = name
 	}
+
 	if s.cfg.Authorizer != nil && !s.cfg.Authorizer.Allow(pub, payload.Subdomain) {
-		return "", nil, "", fmt.Errorf("unauthorized subdomain %s", payload.Subdomain)
+		protocol.Write(ctx, channel, &protocol.Envelope{
+			Type:  protocol.TypeError,
+			Error: fmt.Sprintf("unauthorized subdomain %s", payload.Subdomain),
+		})
+		return
 	}
-	pubKeyStr := base64.StdEncoding.EncodeToString(pub)
+
+	pubKeyStr = base64.StdEncoding.EncodeToString(pub)
 	if s.store != nil {
 		owner, err := s.store.ReservationOwner(ctx, payload.Subdomain)
 		if err != nil {
-			return "", nil, "", err
+			protocol.Write(ctx, channel, &protocol.Envelope{
+				Type:  protocol.TypeError,
+				Error: err.Error(),
+			})
+			return
 		}
 		if owner != "" && owner != pubKeyStr {
-			return "", nil, "", fmt.Errorf("subdomain reserved")
+			protocol.Write(ctx, channel, &protocol.Envelope{
+				Type:  protocol.TypeError,
+				Error: "subdomain reserved",
+			})
+			return
 		}
 		if owner == "" && s.cfg.AutoReserve {
 			if err := s.store.ReserveSubdomain(ctx, payload.Subdomain, pubKeyStr); err != nil {
-				return "", nil, "", err
+				protocol.Write(ctx, channel, &protocol.Envelope{
+					Type:  protocol.TypeError,
+					Error: err.Error(),
+				})
+				return
 			}
 		}
-		go s.store.LogEvent(context.Background(), "handshake", payload.Subdomain, pubKeyStr)
+		go s.store.LogEvent(context.Background(), "connect", payload.Subdomain, pubKeyStr)
 	}
-	readyCtx, readyCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer readyCancel()
-	if err := protocol.Write(readyCtx, conn, &protocol.Envelope{Type: protocol.TypeReady, Ready: &protocol.ReadyPayload{Message: "ready", Subdomain: payload.Subdomain}}); err != nil {
-		return "", nil, "", err
+
+	if err := protocol.Write(ctx, channel, &protocol.Envelope{
+		Type: protocol.TypeReady,
+		Ready: &protocol.ReadyPayload{
+			Message:   "ready",
+			Subdomain: payload.Subdomain,
+		},
+	}); err != nil {
+		s.log.Error().Err(err).Msg("failed to send ready")
+		return
 	}
-	return payload.Subdomain, pub, pubKeyStr, nil
+
+	log := s.log.With().Str("subdomain", payload.Subdomain).Str("pubkey", pubKeyStr).Logger()
+	tunnel := newTunnel(payload.Subdomain, pubKeyStr, channel, log)
+	if !s.registry.register(payload.Subdomain, tunnel) {
+		log.Error().Msg("subdomain already in use")
+		protocol.Write(ctx, channel, &protocol.Envelope{
+			Type:  protocol.TypeError,
+			Error: "subdomain busy",
+		})
+		return
+	}
+
+	log.Info().Msg("tunnel connected and registered")
+
+	tunnelCtx, tunnelCancel := context.WithCancel(ctx)
+	go func() {
+		tunnel.runReader(tunnelCtx)
+		tunnelCancel()
+	}()
+	go tunnel.keepalive(tunnelCtx)
+
+	<-tunnelCtx.Done()
+	s.registry.unregister(payload.Subdomain, tunnel)
+	if s.store != nil {
+		s.store.LogEvent(context.Background(), "disconnect", payload.Subdomain, pubKeyStr)
+	}
+}
+
+func (s *Server) HasTunnel(subdomain string) bool {
+	return s.registry.has(subdomain)
 }
 
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -249,8 +390,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
+	remoteAddr := s.peerAddress(r)
+	s.log.Debug().Str("subdomain", subdomain).Str("method", r.Method).Str("target", r.URL.RequestURI()).Str("remote", remoteAddr).Msg("incoming request")
 	tunnel, ok := s.registry.get(subdomain)
 	if !ok {
+		s.log.Warn().Str("subdomain", subdomain).Msg("tunnel not found for subdomain")
 		http.Error(w, "tunnel not available", http.StatusBadGateway)
 		return
 	}
@@ -271,11 +415,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	resp, err := tunnel.sendRequest(ctx, requestPayload)
 	if err != nil {
-		s.log.Error().Err(err).Str("subdomain", subdomain).Msg("dispatch failed")
+		s.log.Error().Err(err).Str("subdomain", subdomain).Msg("dispatch failed - could not send request to tunnel")
 		s.metrics.Record(subdomain, int64(len(body)), 0, time.Since(start), true)
 		http.Error(w, "tunnel dispatch failed", http.StatusBadGateway)
 		return
 	}
+	s.log.Debug().Str("subdomain", subdomain).Int("status", resp.Status).Dur("latency", time.Since(start)).Msg("request completed")
 	for key, values := range resp.Headers {
 		for _, value := range values {
 			w.Header().Add(key, value)

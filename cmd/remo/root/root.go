@@ -2,6 +2,7 @@ package root
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/rs/zerolog"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/gleicon/remo/internal/logging"
 )
+
+var Version = "dev"
 
 type rootCommand struct {
 	ctx      context.Context
@@ -19,8 +22,9 @@ type rootCommand struct {
 func NewRootCommand(ctx context.Context) *cobra.Command {
 	r := &rootCommand{ctx: ctx}
 	cmd := &cobra.Command{
-		Use:   "remo",
-		Short: "Self-hosted reverse tunnel",
+		Use:     "remo",
+		Short:   "Self-hosted reverse tunnel",
+		Version: Version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if r.logger.GetLevel() != zerolog.NoLevel {
 				return nil
@@ -40,6 +44,13 @@ func NewRootCommand(ctx context.Context) *cobra.Command {
 	cmd.AddCommand(newKeysCommand(r))
 	cmd.AddCommand(newReservationsCommand(r))
 	cmd.AddCommand(newStatusCommand(r))
+	cmd.AddCommand(&cobra.Command{
+		Use:   "version",
+		Short: "Show version",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println("remo version", Version)
+		},
+	})
 	return cmd
 }
 

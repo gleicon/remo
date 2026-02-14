@@ -16,7 +16,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rs/zerolog"
-	"nhooyr.io/websocket"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/gleicon/remo/internal/auth"
 	"github.com/gleicon/remo/internal/identity"
@@ -40,9 +40,8 @@ type Client struct {
 	cfg          Config
 	log          zerolog.Logger
 	upstream     *url.URL
-	serverURL    *url.URL
+	serverURL    string
 	httpClient   *http.Client
-	dialClient   *http.Client
 	identity     *identity.Identity
 	reconnectMin time.Duration
 	reconnectMax time.Duration
@@ -67,10 +66,6 @@ func New(cfg Config) (*Client, error) {
 	if cfg.ReconnectMax < cfg.ReconnectMin {
 		cfg.ReconnectMax = cfg.ReconnectMin
 	}
-	serverURL, err := url.Parse(cfg.ServerURL)
-	if err != nil {
-		return nil, fmt.Errorf("parse server url: %w", err)
-	}
 	upstreamURL, err := url.Parse(cfg.UpstreamURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse upstream url: %w", err)
@@ -79,9 +74,8 @@ func New(cfg Config) (*Client, error) {
 		cfg:          cfg,
 		log:          cfg.Logger,
 		upstream:     upstreamURL,
-		serverURL:    serverURL,
+		serverURL:    cfg.ServerURL,
 		httpClient:   &http.Client{Timeout: 20 * time.Second},
-		dialClient:   &http.Client{Timeout: cfg.DialTimeout},
 		identity:     cfg.Identity,
 		reconnectMin: cfg.ReconnectMin,
 		reconnectMax: cfg.ReconnectMax,
@@ -166,7 +160,23 @@ func cloneHeader(h http.Header) map[string][]string {
 	return result
 }
 
-func (c *Client) sendHello(ctx context.Context, conn *websocket.Conn) error {
+type channelWrapper struct {
+	ch ssh.Channel
+}
+
+func (c *channelWrapper) Read(p []byte) (n int, err error) {
+	return c.ch.Read(p)
+}
+
+func (c *channelWrapper) Write(p []byte) (n int, err error) {
+	return c.ch.Write(p)
+}
+
+func (c *channelWrapper) Close() error {
+	return c.ch.Close()
+}
+
+func (c *Client) sendHello(ctx context.Context, ch *channelWrapper) error {
 	hello := &protocol.HelloPayload{
 		Subdomain: c.cfg.Subdomain,
 		PublicKey: base64.StdEncoding.EncodeToString(c.identity.Public),
@@ -175,12 +185,12 @@ func (c *Client) sendHello(ctx context.Context, conn *websocket.Conn) error {
 	message := auth.BuildHandshakeMessage(hello.Subdomain, hello.Timestamp)
 	signature := ed25519.Sign(c.identity.Private, message)
 	hello.Signature = base64.StdEncoding.EncodeToString(signature)
-	if err := protocol.Write(ctx, conn, &protocol.Envelope{Type: protocol.TypeHello, Hello: hello}); err != nil {
+	if err := protocol.Write(ctx, ch, &protocol.Envelope{Type: protocol.TypeHello, Hello: hello}); err != nil {
 		return err
 	}
 	ackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	ack, err := protocol.Read(ackCtx, conn)
+	ack, err := protocol.Read(ackCtx, ch)
 	if err != nil {
 		return err
 	}
@@ -197,29 +207,33 @@ func (c *Client) sendHello(ctx context.Context, conn *websocket.Conn) error {
 }
 
 func (c *Client) runSession(ctx context.Context) error {
-	sessionCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	conn, err := c.dial(sessionCtx)
+	client, channel, err := c.dialSSH(ctx)
 	if err != nil {
 		return fmt.Errorf("dial tunnel: %w", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "closing")
-	if err := c.sendHello(sessionCtx, conn); err != nil {
-		return err
+	defer client.Close()
+	defer channel.Close()
+
+	ch := &channelWrapper{ch: channel}
+
+	if err := c.sendHello(ctx, ch); err != nil {
+		c.log.Error().Err(err).Msg("handshake failed - check authorization and subdomain availability")
+		return fmt.Errorf("handshake: %w", err)
 	}
-	c.log.Info().Str("subdomain", c.cfg.Subdomain).Msg("connected to server")
+	c.log.Info().Str("subdomain", c.cfg.Subdomain).Msg("connected to server - tunnel ready")
 	c.sendUI(tui.StateMsg{Connected: true})
-	go c.keepalive(sessionCtx, conn)
+
 	for {
-		env, err := protocol.Read(sessionCtx, conn)
+		env, err := protocol.Read(ctx, ch)
 		if err != nil {
 			return err
 		}
 		if env.Type != protocol.TypeRequest || env.Request == nil {
 			continue
 		}
+		c.log.Info().Str("method", env.Request.Method).Str("target", env.Request.Target).Msg("received request from server")
 		start := time.Now()
-		resp, err := c.handleRequest(sessionCtx, env.Request)
+		resp, err := c.handleRequest(ctx, env.Request)
 		latency := time.Since(start)
 		var remote string
 		if addrs, ok := env.Request.Headers["X-Forwarded-For"]; ok && len(addrs) > 0 {
@@ -227,7 +241,7 @@ func (c *Client) runSession(ctx context.Context) error {
 		}
 		if err != nil {
 			c.log.Error().Err(err).Msg("handle request failed")
-			_ = protocol.Write(sessionCtx, conn, &protocol.Envelope{
+			_ = protocol.Write(ctx, ch, &protocol.Envelope{
 				Type: protocol.TypeResponse,
 				Response: &protocol.ResponsePayload{
 					ID:     env.Request.ID,
@@ -247,7 +261,7 @@ func (c *Client) runSession(ctx context.Context) error {
 			})
 			continue
 		}
-		if err := protocol.Write(sessionCtx, conn, &protocol.Envelope{Type: protocol.TypeResponse, Response: resp}); err != nil {
+		if err := protocol.Write(ctx, ch, &protocol.Envelope{Type: protocol.TypeResponse, Response: resp}); err != nil {
 			return err
 		}
 		c.sendUI(tui.RequestLogMsg{
@@ -263,38 +277,36 @@ func (c *Client) runSession(ctx context.Context) error {
 	}
 }
 
-func (c *Client) dial(ctx context.Context) (*websocket.Conn, error) {
-	tunnelURL := *c.serverURL
-	switch tunnelURL.Scheme {
-	case "http":
-		tunnelURL.Scheme = "ws"
-	case "https":
-		tunnelURL.Scheme = "wss"
-	}
-	tunnelURL.Path = "/tunnel"
-	q := tunnelURL.Query()
-	q.Set("subdomain", c.cfg.Subdomain)
-	tunnelURL.RawQuery = q.Encode()
-	conn, _, err := websocket.Dial(ctx, tunnelURL.String(), &websocket.DialOptions{HTTPClient: c.dialClient})
-	return conn, err
-}
+func (c *Client) dialSSH(ctx context.Context) (*ssh.Client, ssh.Channel, error) {
+	c.log.Info().Str("server", c.serverURL).Msg("connecting via SSH")
 
-func (c *Client) keepalive(ctx context.Context, conn *websocket.Conn) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			if err := conn.Ping(pingCtx); err != nil {
-				cancel()
-				return
-			}
-			cancel()
-		}
+	sshConfig := &ssh.ClientConfig{
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
+
+	signer, err := ssh.NewSignerFromKey(c.identity.Private)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create signer: %w", err)
+	}
+	sshConfig.Auth = []ssh.AuthMethod{
+		ssh.PublicKeys(signer),
+	}
+
+	client, err := ssh.Dial("tcp", c.serverURL, sshConfig)
+	if err != nil {
+		c.log.Error().Err(err).Msg("SSH dial failed")
+		return nil, nil, fmt.Errorf("SSH dial: %w", err)
+	}
+
+	channel, _, err := client.OpenChannel(protocol.ProxyChannelType, nil)
+	if err != nil {
+		client.Close()
+		c.log.Error().Err(err).Msg("SSH channel open failed")
+		return nil, nil, fmt.Errorf("SSH channel: %w", err)
+	}
+
+	c.log.Info().Msg("SSH channel established")
+	return client, channel, nil
 }
 
 func (c *Client) backoffDuration(attempt int) time.Duration {

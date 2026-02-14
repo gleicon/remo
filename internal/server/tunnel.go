@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"nhooyr.io/websocket"
 
 	"github.com/gleicon/remo/internal/protocol"
 )
@@ -17,7 +16,7 @@ import (
 type Tunnel struct {
 	subdomain string
 	pubKey    string
-	conn      *websocket.Conn
+	conn      protocol.ReadWriter
 	log       zerolog.Logger
 	closing   chan struct{}
 	inflight  map[string]chan *protocol.ResponsePayload
@@ -25,7 +24,7 @@ type Tunnel struct {
 	counter   uint64
 }
 
-func newTunnel(subdomain, pubKey string, conn *websocket.Conn, log zerolog.Logger) *Tunnel {
+func newTunnel(subdomain, pubKey string, conn protocol.ReadWriter, log zerolog.Logger) *Tunnel {
 	return &Tunnel{
 		subdomain: subdomain,
 		pubKey:    pubKey,
@@ -40,7 +39,6 @@ func (t *Tunnel) close(reason error) {
 	t.mu.Lock()
 	select {
 	case <-t.closing:
-		// already closed
 	default:
 		close(t.closing)
 	}
@@ -126,13 +124,7 @@ func (t *Tunnel) keepalive(ctx context.Context) {
 		case <-t.closing:
 			return
 		case <-ticker.C:
-			pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			if err := t.conn.Ping(pingCtx); err != nil {
-				cancel()
-				t.close(err)
-				return
-			}
-			cancel()
+			_ = t.conn.Close()
 		}
 	}
 }
@@ -153,6 +145,5 @@ func (t *Tunnel) handleEnvelope(env *protocol.Envelope) {
 			ch <- env.Response
 		}
 	default:
-		// ignore unknown frames for now
 	}
 }
