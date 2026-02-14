@@ -41,7 +41,7 @@ die()   { error "$@"; exit 1; }
 
 # Detect architecture and OS
 case "$(uname -m)" in
-    x86_64) arch="amd64" ;;
+    x86_64) arch="x86_64" ;;
     aarch64|arm64) arch="arm64" ;;
     *) die "Unsupported architecture: $(uname -m)" ;;
 esac
@@ -75,10 +75,10 @@ if [ -f "$INSTALL_DIR/remo" ] && [ "$FORCE" = false ]; then
 fi
 
 # Download URL
-filename="remo_${version}_${os}_${arch}.tar.gz"
+filename="remo_${os}_${arch}.tar.gz"
 url="https://github.com/gleicon/remo/releases/download/v${version}/${filename}"
 
-info "Downloading $filename..."
+info "Downloading $filename from $url..."
 tmpdir=$(mktemp -d)
 trap "rm -rf $tmpdir" EXIT
 

@@ -113,7 +113,7 @@ install_remo_binary() {
     local os
     
     case "$(uname -m)" in
-        x86_64) arch="amd64" ;;
+        x86_64) arch="x86_64" ;;
         aarch64|arm64) arch="arm64" ;;
         *) die "Unsupported architecture: $(uname -m)" ;;
     esac
@@ -131,7 +131,7 @@ install_remo_binary() {
         die "Failed to get latest release version"
     fi
     
-    local filename="remo_${version}_${os}_${arch}"
+    local filename="remo_${os}_${arch}"
     
     if [ "$os" = "darwin" ]; then
         filename="${filename}.tar.gz"
