@@ -56,59 +56,6 @@ func TestExtractSubdomain(t *testing.T) {
 	}
 }
 
-func TestForwardHeadersStandalone(t *testing.T) {
-	srv := testServer(func(c *Config) {
-		c.Mode = ModeStandalone
-	})
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.RemoteAddr = "1.2.3.4:5678"
-	headers := srv.forwardHeaders(req, "foo")
-	if headers["X-Forwarded-Proto"][0] != "https" {
-		t.Fatalf("expected https, got %s", headers["X-Forwarded-Proto"][0])
-	}
-	if headers["X-Forwarded-For"][0] != "1.2.3.4" {
-		t.Fatalf("expected 1.2.3.4, got %s", headers["X-Forwarded-For"][0])
-	}
-	if headers["X-Remo-Subdomain"][0] != "foo" {
-		t.Fatalf("expected foo, got %s", headers["X-Remo-Subdomain"][0])
-	}
-}
-
-func TestForwardHeadersBehindProxy(t *testing.T) {
-	_, cidr, _ := net.ParseCIDR("127.0.0.0/8")
-	srv := testServer(func(c *Config) {
-		c.Mode = ModeProxy
-		c.TrustedProxies = []*net.IPNet{cidr}
-	})
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("X-Forwarded-Proto", "https")
-	req.Header.Set("X-Forwarded-For", "10.0.0.1")
-	headers := srv.forwardHeaders(req, "bar")
-	if headers["X-Forwarded-Proto"][0] != "https" {
-		t.Fatalf("expected https from proxy, got %s", headers["X-Forwarded-Proto"][0])
-	}
-	if headers["X-Forwarded-For"][0] != "10.0.0.1, 127.0.0.1" {
-		t.Fatalf("expected appended XFF, got %s", headers["X-Forwarded-For"][0])
-	}
-}
-
-func TestForwardHeadersUntrustedProxy(t *testing.T) {
-	srv := testServer(func(c *Config) {
-		c.Mode = ModeProxy
-	})
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.RemoteAddr = "10.0.0.1:1234"
-	req.Header.Set("X-Forwarded-For", "spoofed")
-	headers := srv.forwardHeaders(req, "foo")
-	if headers["X-Forwarded-For"][0] != "10.0.0.1" {
-		t.Fatalf("expected peer IP only, got %s", headers["X-Forwarded-For"][0])
-	}
-	if headers["X-Forwarded-Proto"][0] != "http" {
-		t.Fatalf("expected http for untrusted proxy, got %s", headers["X-Forwarded-Proto"][0])
-	}
-}
-
 func TestProxyNoSubdomain(t *testing.T) {
 	srv := testServer()
 	rec := httptest.NewRecorder()
@@ -180,11 +127,10 @@ func TestAuthorizeAdminNoBearer(t *testing.T) {
 
 func TestRegistryOperations(t *testing.T) {
 	reg := newRegistry()
-	tunnel := &Tunnel{subdomain: "foo"}
-	if !reg.register("foo", tunnel) {
+	if !reg.register("foo", 8080, "testkey") {
 		t.Fatal("register should succeed")
 	}
-	if reg.register("foo", &Tunnel{subdomain: "foo"}) {
+	if reg.register("foo", 8081, "testkey2") {
 		t.Fatal("duplicate register should fail")
 	}
 	if !reg.has("foo") {
@@ -193,11 +139,11 @@ func TestRegistryOperations(t *testing.T) {
 	if reg.has("bar") {
 		t.Fatal("should not have bar")
 	}
-	got, ok := reg.get("foo")
-	if !ok || got != tunnel {
-		t.Fatal("get should return the registered tunnel")
+	port, pubKey, ok := reg.get("foo")
+	if !ok || port != 8080 || pubKey != "testkey" {
+		t.Fatalf("get returned wrong values: port=%d pubKey=%s", port, pubKey)
 	}
-	_, ok = reg.get("bar")
+	_, _, ok = reg.get("bar")
 	if ok {
 		t.Fatal("get should return false for unregistered")
 	}
@@ -205,28 +151,17 @@ func TestRegistryOperations(t *testing.T) {
 	if len(list) != 1 || list[0] != "foo" {
 		t.Fatalf("list mismatch: %v", list)
 	}
-	reg.unregister("foo", tunnel)
+	reg.unregister("foo")
 	if reg.has("foo") {
 		t.Fatal("should not have foo after unregister")
 	}
 }
 
-func TestRegistryUnregisterWrongTunnel(t *testing.T) {
-	reg := newRegistry()
-	t1 := &Tunnel{subdomain: "foo"}
-	t2 := &Tunnel{subdomain: "foo"}
-	reg.register("foo", t1)
-	reg.unregister("foo", t2)
-	if !reg.has("foo") {
-		t.Fatal("should still have foo because different tunnel pointer")
-	}
-}
-
 func TestRegistryListSorted(t *testing.T) {
 	reg := newRegistry()
-	reg.register("zebra", &Tunnel{subdomain: "zebra"})
-	reg.register("alpha", &Tunnel{subdomain: "alpha"})
-	reg.register("mid", &Tunnel{subdomain: "mid"})
+	reg.register("zebra", 8080, "key1")
+	reg.register("alpha", 8081, "key2")
+	reg.register("mid", 8082, "key3")
 	list := reg.list()
 	if len(list) != 3 {
 		t.Fatalf("expected 3, got %d", len(list))
@@ -240,7 +175,7 @@ func TestMetricsRecord(t *testing.T) {
 	m := newMetrics()
 	m.Record("foo", 100, 200, 10*time.Millisecond, false)
 	m.Record("foo", 50, 100, 20*time.Millisecond, true)
-	snap := m.Snapshot()
+	snap := m.snapshot()
 	if snap.TotalRequests != 2 {
 		t.Fatalf("expected 2 requests, got %d", snap.TotalRequests)
 	}
@@ -253,17 +188,6 @@ func TestMetricsRecord(t *testing.T) {
 	if snap.BytesOut != 300 {
 		t.Fatalf("expected 300 bytes out, got %d", snap.BytesOut)
 	}
-	if snap.AvgLatencyMs <= 0 {
-		t.Fatal("expected positive avg latency")
-	}
-}
-
-func TestMetricsSnapshotEmpty(t *testing.T) {
-	m := newMetrics()
-	snap := m.Snapshot()
-	if snap.TotalRequests != 0 || snap.AvgLatencyMs != 0 {
-		t.Fatal("empty metrics should be zero")
-	}
 }
 
 func TestStatusEndpointContent(t *testing.T) {
@@ -272,15 +196,9 @@ func TestStatusEndpointContent(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
 	srv.handleStatus(rec, req)
-	var status statusResponse
+	var status statusSnapshot
 	if err := json.NewDecoder(rec.Body).Decode(&status); err != nil {
 		t.Fatalf("decode: %v", err)
-	}
-	if status.Domain != "rempapps.site" {
-		t.Fatalf("domain: %s", status.Domain)
-	}
-	if status.Mode != ModeProxy {
-		t.Fatalf("mode: %s", status.Mode)
 	}
 	if status.UptimeSeconds < 0 {
 		t.Fatal("negative uptime")
@@ -331,6 +249,7 @@ func TestHandlerRoutes(t *testing.T) {
 		{"/healthz", http.StatusOK},
 		{"/status", http.StatusUnauthorized},
 		{"/metrics", http.StatusUnauthorized},
+		{"/register", http.StatusMethodNotAllowed},
 	}
 	for _, tt := range tests {
 		rec := httptest.NewRecorder()
@@ -360,18 +279,9 @@ func TestHasTunnel(t *testing.T) {
 	if srv.HasTunnel("foo") {
 		t.Fatal("should not have tunnel")
 	}
-	srv.registry.register("foo", &Tunnel{subdomain: "foo"})
+	srv.registry.register("foo", 8080, "testkey")
 	if !srv.HasTunnel("foo") {
 		t.Fatal("should have tunnel")
-	}
-}
-
-func TestCloneHeader(t *testing.T) {
-	original := http.Header{"Accept": {"text/html", "application/json"}, "Host": {"example.com"}}
-	cloned := cloneHeader(original)
-	cloned["Accept"][0] = "modified"
-	if original["Accept"][0] != "text/html" {
-		t.Fatal("clone modified original")
 	}
 }
 
@@ -385,18 +295,6 @@ func TestPeerAddress(t *testing.T) {
 	req.RemoteAddr = "1.2.3.4"
 	if got := srv.peerAddress(req); got != "1.2.3.4" {
 		t.Fatalf("expected 1.2.3.4 without port, got %s", got)
-	}
-}
-
-func TestMax64(t *testing.T) {
-	if max64(5, 0) != 5 {
-		t.Fatal("5 should be > 0")
-	}
-	if max64(-1, 0) != 0 {
-		t.Fatal("-1 should clamp to 0")
-	}
-	if max64(0, 0) != 0 {
-		t.Fatal("0 should return 0")
 	}
 }
 

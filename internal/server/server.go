@@ -10,21 +10,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
-	"os"
+	"net/http/httputil"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/gliderlabs/ssh"
 	"github.com/rs/zerolog"
-	xssh "golang.org/x/crypto/ssh"
 
 	"github.com/gleicon/remo/internal/auth"
-	"github.com/gleicon/remo/internal/protocol"
 	"github.com/gleicon/remo/internal/store"
 )
 
@@ -50,16 +46,16 @@ type Config struct {
 	Store           *store.Store
 	AutoReserve     bool
 	AllowRandom     bool
-	SSHHostKey      string
 }
 
 type Server struct {
-	cfg      Config
-	log      zerolog.Logger
-	registry *registry
-	store    *store.Store
-	started  time.Time
-	metrics  *metrics
+	cfg        Config
+	log        zerolog.Logger
+	registry   *registry
+	store      *store.Store
+	started    time.Time
+	metrics    *metrics
+	httpClient *http.Client
 }
 
 func New(cfg Config) *Server {
@@ -72,10 +68,20 @@ func New(cfg Config) *Server {
 	if cfg.TrustedHops == 0 {
 		cfg.TrustedHops = 1
 	}
-	if cfg.SSHHostKey == "" {
-		cfg.SSHHostKey = "0.0.0.0:22"
+	return &Server{
+		cfg:      cfg,
+		log:      cfg.Logger,
+		registry: newRegistry(),
+		store:    cfg.Store,
+		started:  time.Now(),
+		metrics:  newMetrics(),
+		httpClient: &http.Client{
+			Timeout: cfg.ReadTimeout,
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			},
+		},
 	}
-	return &Server{cfg: cfg, log: cfg.Logger, registry: newRegistry(), store: cfg.Store, started: time.Now(), metrics: newMetrics()}
 }
 
 func (s *Server) routingDomain() string {
@@ -95,6 +101,7 @@ func generateRandomSubdomain() (string, error) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/register", s.handleRegister)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/metrics", s.handleMetrics)
@@ -116,267 +123,161 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
 
-	errChan := make(chan error, 2)
-
-	go func() {
-		errChan <- s.runSSHServer(ctx)
-	}()
-
-	go func() {
-		switch s.cfg.Mode {
-		case ModeStandalone:
-			if s.cfg.TLSCertFile == "" || s.cfg.TLSKeyFile == "" {
-				errChan <- errors.New("standalone mode requires tls cert and key")
-				return
-			}
-			errChan <- httpServer.ListenAndServeTLS(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
-		default:
-			errChan <- httpServer.ListenAndServe()
+	switch s.cfg.Mode {
+	case ModeStandalone:
+		if s.cfg.TLSCertFile == "" || s.cfg.TLSKeyFile == "" {
+			return errors.New("standalone mode requires tls cert and key")
 		}
-	}()
-
-	var err error
-	select {
-	case <-ctx.Done():
-		return nil
-	case err = <-errChan:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Server) runSSHServer(ctx context.Context) error {
-	if s.cfg.SSHHostKey == "" {
-		return errors.New("ssh-host-key is required")
-	}
-
-	hostKeyData, err := os.ReadFile(s.cfg.SSHHostKey)
-	if err != nil {
-		return fmt.Errorf("read SSH host key: %w", err)
-	}
-
-	hostKey, err := xssh.ParsePrivateKey(hostKeyData)
-	if err != nil {
-		return fmt.Errorf("parse SSH host key: %w", err)
-	}
-
-	sshServer := &ssh.Server{
-		Addr:    ":22",
-		Handler: s.handleSSH,
-	}
-	sshServer.AddHostKey(hostKey)
-	sshServer.SetOption(ssh.PublicKeyAuth(s.handlePublicKeyAuth))
-
-	errChan := make(chan error, 1)
-	go func() {
-		errChan <- sshServer.ListenAndServe()
-	}()
-
-	select {
-	case <-ctx.Done():
-		return sshServer.Shutdown(context.Background())
-	case err := <-errChan:
-		return err
-	}
-}
-
-func (s *Server) handlePublicKeyAuth(ctx ssh.Context, key ssh.PublicKey) bool {
-	pubKeyStr := base64.StdEncoding.EncodeToString(key.Marshal())
-	s.log.Debug().Str("pubkey", pubKeyStr).Str("client", ctx.ClientVersion()).Msg("public key auth attempt")
-
-	if s.cfg.Authorizer != nil {
-		pub := ed25519.PublicKey(key.Marshal())
-		if !s.cfg.Authorizer.Allow(pub, "") {
-			s.log.Warn().Str("pubkey", pubKeyStr).Msg("public key not authorized")
-			return false
-		}
-	}
-
-	ctx.SetValue("pubkey", pubKeyStr)
-	return true
-}
-
-func (s *Server) handleSSH(session ssh.Session) {
-	ctx := context.Background()
-	pubKeyStr, _ := session.Context().Value("pubkey").(string)
-
-	s.log.Info().Str("client", session.RemoteAddr().String()).Msg("new SSH connection")
-
-	// Session implements io.ReadWriteCloser - use it directly as the channel
-	channel := session
-
-	helloCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	env, err := protocol.Read(helloCtx, channel)
-	if err != nil {
-		s.log.Error().Err(err).Msg("failed to read hello from client")
-		return
-	}
-	if env.Type != protocol.TypeHello || env.Hello == nil {
-		s.log.Error().Msg("invalid hello message")
-		return
-	}
-
-	payload := env.Hello
-	originalSubdomain := payload.Subdomain
-	randomAssigned := false
-
-	if payload.Subdomain == "" {
-		if !s.cfg.AllowRandom {
-			protocol.Write(ctx, channel, &protocol.Envelope{
-				Type:  protocol.TypeError,
-				Error: "missing subdomain (random not enabled)",
-			})
-			return
-		}
-		randomAssigned = true
-	}
-
-	if !auth.FreshTimestamp(payload.Timestamp) {
-		protocol.Write(ctx, channel, &protocol.Envelope{
-			Type:  protocol.TypeError,
-			Error: "stale handshake",
-		})
-		return
-	}
-
-	pubBytes, err := base64.StdEncoding.DecodeString(payload.PublicKey)
-	if err != nil {
-		protocol.Write(ctx, channel, &protocol.Envelope{
-			Type:  protocol.TypeError,
-			Error: "invalid public key",
-		})
-		return
-	}
-	if len(pubBytes) != ed25519.PublicKeySize {
-		protocol.Write(ctx, channel, &protocol.Envelope{
-			Type:  protocol.TypeError,
-			Error: "invalid public key size",
-		})
-		return
-	}
-
-	sigBytes, err := base64.StdEncoding.DecodeString(payload.Signature)
-	if err != nil {
-		protocol.Write(ctx, channel, &protocol.Envelope{
-			Type:  protocol.TypeError,
-			Error: "invalid signature",
-		})
-		return
-	}
-
-	pub := ed25519.PublicKey(pubBytes)
-	message := auth.BuildHandshakeMessage(originalSubdomain, payload.Timestamp)
-	if !ed25519.Verify(pub, message, sigBytes) {
-		protocol.Write(ctx, channel, &protocol.Envelope{
-			Type:  protocol.TypeError,
-			Error: "signature mismatch",
-		})
-		return
-	}
-
-	if randomAssigned {
-		name, err := generateRandomSubdomain()
-		if err != nil {
-			protocol.Write(ctx, channel, &protocol.Envelope{
-				Type:  protocol.TypeError,
-				Error: "failed to generate subdomain",
-			})
-			return
-		}
-		for s.registry.has(name) {
-			name, err = generateRandomSubdomain()
-			if err != nil {
-				protocol.Write(ctx, channel, &protocol.Envelope{
-					Type:  protocol.TypeError,
-					Error: "failed to generate subdomain",
-				})
-				return
-			}
-		}
-		payload.Subdomain = name
-	}
-
-	if s.cfg.Authorizer != nil && !s.cfg.Authorizer.Allow(pub, payload.Subdomain) {
-		protocol.Write(ctx, channel, &protocol.Envelope{
-			Type:  protocol.TypeError,
-			Error: fmt.Sprintf("unauthorized subdomain %s", payload.Subdomain),
-		})
-		return
-	}
-
-	pubKeyStr = base64.StdEncoding.EncodeToString(pub)
-	if s.store != nil {
-		owner, err := s.store.ReservationOwner(ctx, payload.Subdomain)
-		if err != nil {
-			protocol.Write(ctx, channel, &protocol.Envelope{
-				Type:  protocol.TypeError,
-				Error: err.Error(),
-			})
-			return
-		}
-		if owner != "" && owner != pubKeyStr {
-			protocol.Write(ctx, channel, &protocol.Envelope{
-				Type:  protocol.TypeError,
-				Error: "subdomain reserved",
-			})
-			return
-		}
-		if owner == "" && s.cfg.AutoReserve {
-			if err := s.store.ReserveSubdomain(ctx, payload.Subdomain, pubKeyStr); err != nil {
-				protocol.Write(ctx, channel, &protocol.Envelope{
-					Type:  protocol.TypeError,
-					Error: err.Error(),
-				})
-				return
-			}
-		}
-		go s.store.LogEvent(context.Background(), "connect", payload.Subdomain, pubKeyStr)
-	}
-
-	if err := protocol.Write(ctx, channel, &protocol.Envelope{
-		Type: protocol.TypeReady,
-		Ready: &protocol.ReadyPayload{
-			Message:   "ready",
-			Subdomain: payload.Subdomain,
-		},
-	}); err != nil {
-		s.log.Error().Err(err).Msg("failed to send ready")
-		return
-	}
-
-	log := s.log.With().Str("subdomain", payload.Subdomain).Str("pubkey", pubKeyStr).Logger()
-	tunnel := newTunnel(payload.Subdomain, pubKeyStr, channel, log)
-	if !s.registry.register(payload.Subdomain, tunnel) {
-		log.Error().Msg("subdomain already in use")
-		protocol.Write(ctx, channel, &protocol.Envelope{
-			Type:  protocol.TypeError,
-			Error: "subdomain busy",
-		})
-		return
-	}
-
-	log.Info().Msg("tunnel connected and registered")
-
-	tunnelCtx, tunnelCancel := context.WithCancel(ctx)
-	go func() {
-		tunnel.runReader(tunnelCtx)
-		tunnelCancel()
-	}()
-	go tunnel.keepalive(tunnelCtx)
-
-	<-tunnelCtx.Done()
-	s.registry.unregister(payload.Subdomain, tunnel)
-	if s.store != nil {
-		s.store.LogEvent(context.Background(), "disconnect", payload.Subdomain, pubKeyStr)
+		return httpServer.ListenAndServeTLS(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+	default:
+		return httpServer.ListenAndServe()
 	}
 }
 
 func (s *Server) HasTunnel(subdomain string) bool {
 	return s.registry.has(subdomain)
+}
+
+type registrationRequest struct {
+	Subdomain  string `json:"subdomain"`
+	RemotePort int    `json:"remote_port"`
+}
+
+func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	remoteAddr := s.peerAddress(r)
+	isLocalhost := remoteAddr == "127.0.0.1" || remoteAddr == "::1" || remoteAddr == "localhost"
+
+	if !isLocalhost && s.cfg.Authorizer != nil {
+		s.log.Warn().Str("remote", remoteAddr).Msg("rejecting non-local registration")
+		http.Error(w, "registration must go through SSH tunnel", http.StatusForbidden)
+		return
+	}
+
+	s.log.Debug().Str("remote", remoteAddr).Msg("registration request")
+
+	var req registrationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.log.Error().Err(err).Msg("failed to decode registration request")
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	subdomain := req.Subdomain
+
+	if subdomain == "" {
+		if !s.cfg.AllowRandom {
+			http.Error(w, "missing subdomain (random not enabled)", http.StatusBadRequest)
+			return
+		}
+		for i := 0; i < 10; i++ {
+			name, err := generateRandomSubdomain()
+			if err != nil {
+				continue
+			}
+			if !s.registry.has(name) {
+				subdomain = name
+				break
+			}
+		}
+		if subdomain == "" {
+			http.Error(w, "failed to generate subdomain", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if !s.validateSubdomain(subdomain) {
+			http.Error(w, "invalid subdomain format", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if req.RemotePort <= 0 || req.RemotePort > 65535 {
+		http.Error(w, "invalid remote port", http.StatusBadRequest)
+		return
+	}
+
+	authorizedKey := r.Header.Get("X-Remo-Publickey")
+	authorizedKeyStr := authorizedKey
+
+	if s.cfg.Authorizer != nil {
+		if authorizedKey == "" {
+			s.log.Warn().Msg("registration without public key")
+			http.Error(w, "unauthorized: no public key", http.StatusForbidden)
+			return
+		}
+		pubBytes, err := base64.StdEncoding.DecodeString(authorizedKey)
+		if err != nil || len(pubBytes) != ed25519.PublicKeySize {
+			s.log.Warn().Msg("invalid public key in header")
+			http.Error(w, "unauthorized", http.StatusForbidden)
+			return
+		}
+		pub := ed25519.PublicKey(pubBytes)
+		if !s.cfg.Authorizer.Allow(pub, subdomain) {
+			s.log.Warn().Str("pubkey", authorizedKey).Str("subdomain", subdomain).Msg("authorization denied")
+			http.Error(w, "unauthorized", http.StatusForbidden)
+			return
+		}
+	}
+
+	if s.store != nil {
+		owner, err := s.store.ReservationOwner(r.Context(), subdomain)
+		if err != nil {
+			s.log.Error().Err(err).Msg("failed to check reservation")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if owner != "" && owner != authorizedKeyStr {
+			s.log.Warn().Str("subdomain", subdomain).Msg("subdomain already reserved")
+			http.Error(w, "subdomain reserved", http.StatusForbidden)
+			return
+		}
+		if owner == "" && s.cfg.AutoReserve {
+			if err := s.store.ReserveSubdomain(r.Context(), subdomain, authorizedKeyStr); err != nil {
+				s.log.Error().Err(err).Msg("failed to reserve subdomain")
+			}
+		}
+		go s.store.LogEvent(r.Context(), "register", subdomain, authorizedKeyStr)
+	}
+
+	if !s.registry.register(subdomain, req.RemotePort, authorizedKeyStr) {
+		s.log.Warn().Str("subdomain", subdomain).Msg("subdomain already in use")
+		http.Error(w, "subdomain already in use", http.StatusConflict)
+		return
+	}
+
+	s.log.Info().Str("subdomain", subdomain).Int("port", req.RemotePort).Msg("tunnel registered")
+
+	scheme := "http"
+	if s.cfg.Mode == ModeStandalone {
+		scheme = "https"
+	}
+	fullURL := fmt.Sprintf("%s://%s.%s", scheme, subdomain, s.routingDomain())
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"subdomain": subdomain,
+		"url":       fullURL,
+		"status":    "ok",
+	})
+}
+
+func (s *Server) validateSubdomain(name string) bool {
+	if len(name) < 1 || len(name) > 63 {
+		return false
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			return false
+		}
+	}
+	if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") {
+		return false
+	}
+	return true
 }
 
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -392,45 +293,31 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	remoteAddr := s.peerAddress(r)
 	s.log.Debug().Str("subdomain", subdomain).Str("method", r.Method).Str("target", r.URL.RequestURI()).Str("remote", remoteAddr).Msg("incoming request")
-	tunnel, ok := s.registry.get(subdomain)
+
+	port, pubKey, ok := s.registry.get(subdomain)
 	if !ok {
 		s.log.Warn().Str("subdomain", subdomain).Msg("tunnel not found for subdomain")
 		http.Error(w, "tunnel not available", http.StatusBadGateway)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, protocol.MaxBodyBytes))
-	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
-		return
+
+	r.Header.Set("X-Remo-Subdomain", subdomain)
+	r.Header.Set("X-Remo-Pubkey", pubKey)
+
+	director := func(req *http.Request) {
+		req.URL.Scheme = "http"
+		req.URL.Host = fmt.Sprintf("127.0.0.1:%d", port)
+		req.Host = fmt.Sprintf("127.0.0.1:%d", port)
 	}
-	_ = r.Body.Close()
-	headers := s.forwardHeaders(r, subdomain)
-	requestPayload := &protocol.RequestPayload{
-		Method:  r.Method,
-		Target:  r.URL.RequestURI(),
-		Headers: headers,
-		Body:    body,
+	proxy := &httputil.ReverseProxy{Director: director}
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		s.log.Error().Err(err).Str("subdomain", subdomain).Msg("proxy error")
+		s.metrics.Record(subdomain, 0, 0, time.Since(start), true)
+		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.ReadTimeout)
-	defer cancel()
-	resp, err := tunnel.sendRequest(ctx, requestPayload)
-	if err != nil {
-		s.log.Error().Err(err).Str("subdomain", subdomain).Msg("dispatch failed - could not send request to tunnel")
-		s.metrics.Record(subdomain, int64(len(body)), 0, time.Since(start), true)
-		http.Error(w, "tunnel dispatch failed", http.StatusBadGateway)
-		return
-	}
-	s.log.Debug().Str("subdomain", subdomain).Int("status", resp.Status).Dur("latency", time.Since(start)).Msg("request completed")
-	for key, values := range resp.Headers {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
-	w.WriteHeader(resp.Status)
-	if len(resp.Body) > 0 {
-		w.Write(resp.Body)
-	}
-	s.metrics.Record(subdomain, int64(len(body)), int64(len(resp.Body)), time.Since(start), false)
+
+	proxy.ServeHTTP(w, r)
+	s.metrics.Record(subdomain, 0, 0, time.Since(start), false)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -483,27 +370,6 @@ func (s *Server) extractSubdomain(host string) string {
 	return parts[len(parts)-1]
 }
 
-func (s *Server) forwardHeaders(r *http.Request, subdomain string) map[string][]string {
-	headers := cloneHeader(r.Header)
-	clientIP := s.peerAddress(r)
-	forwardedFor := clientIP
-	if prior := r.Header.Get("X-Forwarded-For"); prior != "" && s.trustedProxy(r) {
-		forwardedFor = prior + ", " + clientIP
-	}
-	headers["X-Forwarded-For"] = []string{forwardedFor}
-	proto := "http"
-	if s.cfg.Mode == ModeStandalone {
-		proto = "https"
-	} else if s.trustedProxy(r) {
-		if hdr := r.Header.Get("X-Forwarded-Proto"); hdr != "" {
-			proto = hdr
-		}
-	}
-	headers["X-Forwarded-Proto"] = []string{proto}
-	headers["X-Remo-Subdomain"] = []string{subdomain}
-	return headers
-}
-
 func (s *Server) validateHops(r *http.Request) bool {
 	if !s.trustedProxy(r) {
 		return true
@@ -544,14 +410,50 @@ func (s *Server) peerAddress(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-func cloneHeader(h http.Header) map[string][]string {
-	result := make(map[string][]string, len(h))
-	for k, values := range h {
-		copyValues := make([]string, len(values))
-		copy(copyValues, values)
-		result[k] = copyValues
+func (s *Server) authorizeAdmin(r *http.Request) bool {
+	if s.cfg.AdminSecret == "" {
+		return false
 	}
-	return result
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(s.cfg.AdminSecret)) == 1
+}
+
+func (s *Server) snapshot(ctx context.Context) statusSnapshot {
+	active := s.registry.list()
+	snapshot := statusSnapshot{
+		ActiveTunnels:  len(active),
+		Tunnels:        active,
+		AuthorizedKeys: 0,
+		Reservations:   0,
+		UptimeSeconds:  uint64(time.Since(s.started).Seconds()),
+		TotalRequests:  s.metrics.requests.Load(),
+		TotalErrors:    s.metrics.errors.Load(),
+		TotalBytesIn:   s.metrics.bytesIn.Load(),
+		TotalBytesOut:  s.metrics.bytesOut.Load(),
+	}
+	if s.cfg.Authorizer != nil {
+		snapshot.AuthorizedKeys = len(s.cfg.Authorizer.Entries())
+	}
+	if s.store != nil {
+		count, _ := s.store.CountReservations(ctx)
+		snapshot.Reservations = count
+	}
+	return snapshot
+}
+
+type statusSnapshot struct {
+	ActiveTunnels  int      `json:"active_tunnels"`
+	Tunnels        []string `json:"tunnels"`
+	AuthorizedKeys int      `json:"authorized_keys"`
+	Reservations   int      `json:"reservations"`
+	UptimeSeconds  uint64   `json:"uptime_seconds"`
+	TotalRequests  uint64   `json:"total_requests"`
+	TotalErrors    uint64   `json:"total_errors"`
+	TotalBytesIn   uint64   `json:"total_bytes_in"`
+	TotalBytesOut  uint64   `json:"total_bytes_out"`
 }
 
 type metrics struct {
@@ -573,105 +475,42 @@ type metricsSnapshot struct {
 	TotalErrors   uint64
 	BytesIn       uint64
 	BytesOut      uint64
-	AvgLatencyMs  float64
 }
 
 func newMetrics() *metrics {
 	return &metrics{}
 }
 
-func (m *metrics) Record(subdomain string, reqBytes, respBytes int64, latency time.Duration, failed bool) {
+func (m *metrics) Record(subdomain string, bytesIn, bytesOut int64, latency time.Duration, isError bool) {
 	m.requests.Add(1)
-	m.bytesIn.Add(uint64(max64(reqBytes, 0)))
-	m.bytesOut.Add(uint64(max64(respBytes, 0)))
-	m.latencySum.Add(uint64(latency.Microseconds()))
-	stat := m.getSubdomain(subdomain)
-	stat.requests.Add(1)
-	if failed {
+	if isError {
 		m.errors.Add(1)
-		stat.errors.Add(1)
+	}
+	m.bytesIn.Add(uint64(bytesIn))
+	m.bytesOut.Add(uint64(bytesOut))
+	m.latencySum.Add(uint64(latency.Milliseconds()))
+
+	if val, ok := m.subdomains.Load(subdomain); ok {
+		stats := val.(*subdomainStats)
+		stats.requests.Add(1)
+		if isError {
+			stats.errors.Add(1)
+		}
+	} else {
+		stats := &subdomainStats{}
+		stats.requests.Add(1)
+		if isError {
+			stats.errors.Add(1)
+		}
+		m.subdomains.Store(subdomain, stats)
 	}
 }
 
-func (m *metrics) getSubdomain(name string) *subdomainStats {
-	value, _ := m.subdomains.LoadOrStore(name, &subdomainStats{})
-	return value.(*subdomainStats)
-}
-
-func (m *metrics) Snapshot() metricsSnapshot {
-	total := m.requests.Load()
-	avg := 0.0
-	if total > 0 {
-		avg = float64(m.latencySum.Load()) / float64(total) / 1000.0
-	}
+func (m *metrics) snapshot() metricsSnapshot {
 	return metricsSnapshot{
-		TotalRequests: total,
+		TotalRequests: m.requests.Load(),
 		TotalErrors:   m.errors.Load(),
 		BytesIn:       m.bytesIn.Load(),
 		BytesOut:      m.bytesOut.Load(),
-		AvgLatencyMs:  avg,
-	}
-}
-
-func max64(value int64, min int64) int64 {
-	if value < min {
-		return min
-	}
-	return value
-}
-
-func (s *Server) authorizeAdmin(r *http.Request) bool {
-	if s.cfg.AdminSecret == "" {
-		return false
-	}
-	const prefix = "Bearer "
-	authHeader := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, prefix) {
-		return false
-	}
-	token := strings.TrimSpace(strings.TrimPrefix(authHeader, prefix))
-	return subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.AdminSecret)) == 1
-}
-
-type statusResponse struct {
-	Domain         string    `json:"domain"`
-	Mode           Mode      `json:"mode"`
-	StartedAt      time.Time `json:"started_at"`
-	UptimeSeconds  int64     `json:"uptime_seconds"`
-	ActiveTunnels  int       `json:"active_tunnels"`
-	Subdomains     []string  `json:"subdomains"`
-	AuthorizedKeys int       `json:"authorized_keys"`
-	Reservations   int       `json:"reservations"`
-	TotalRequests  uint64    `json:"total_requests"`
-	TotalErrors    uint64    `json:"total_errors"`
-	BytesIn        uint64    `json:"bytes_in"`
-	BytesOut       uint64    `json:"bytes_out"`
-	AvgLatencyMs   float64   `json:"avg_latency_ms"`
-}
-
-func (s *Server) snapshot(ctx context.Context) statusResponse {
-	subdomains := s.registry.list()
-	stats := store.StoreStats{}
-	if s.store != nil {
-		if st, err := s.store.Stats(ctx); err == nil {
-			stats = st
-		}
-	}
-	metricsSnapshot := s.metrics.Snapshot()
-	uptime := time.Since(s.started)
-	return statusResponse{
-		Domain:         s.cfg.Domain,
-		Mode:           s.cfg.Mode,
-		StartedAt:      s.started,
-		UptimeSeconds:  int64(uptime.Seconds()),
-		ActiveTunnels:  len(subdomains),
-		Subdomains:     subdomains,
-		AuthorizedKeys: stats.AuthorizedKeys,
-		Reservations:   stats.Reservations,
-		TotalRequests:  metricsSnapshot.TotalRequests,
-		TotalErrors:    metricsSnapshot.TotalErrors,
-		BytesIn:        metricsSnapshot.BytesIn,
-		BytesOut:       metricsSnapshot.BytesOut,
-		AvgLatencyMs:   metricsSnapshot.AvgLatencyMs,
 	}
 }

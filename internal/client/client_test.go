@@ -20,7 +20,8 @@ func testIdentity(t *testing.T) *identity.Identity {
 
 func TestNewClientRequiresIdentity(t *testing.T) {
 	_, err := New(Config{
-		ServerURL:   "http://localhost:8080",
+		Server:      "localhost",
+		ServerPort:  22,
 		Subdomain:   "foo",
 		UpstreamURL: "http://localhost:3000",
 		Logger:      zerolog.New(io.Discard),
@@ -30,35 +31,24 @@ func TestNewClientRequiresIdentity(t *testing.T) {
 	}
 }
 
-func TestNewClientInvalidServerURL(t *testing.T) {
+func TestNewClientWithServer(t *testing.T) {
 	_, err := New(Config{
-		ServerURL:   "://bad",
+		Server:      "localhost",
+		ServerPort:  22,
 		Subdomain:   "foo",
 		UpstreamURL: "http://localhost:3000",
 		Logger:      zerolog.New(io.Discard),
 		Identity:    testIdentity(t),
 	})
-	if err == nil {
-		t.Fatal("expected error for invalid server URL")
-	}
-}
-
-func TestNewClientInvalidUpstreamURL(t *testing.T) {
-	_, err := New(Config{
-		ServerURL:   "http://localhost:8080",
-		Subdomain:   "foo",
-		UpstreamURL: "://bad",
-		Logger:      zerolog.New(io.Discard),
-		Identity:    testIdentity(t),
-	})
-	if err == nil {
-		t.Fatal("expected error for invalid upstream URL")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func TestNewClientDefaults(t *testing.T) {
 	c, err := New(Config{
-		ServerURL:   "http://localhost:8080",
+		Server:      "localhost",
+		ServerPort:  22,
 		Subdomain:   "foo",
 		UpstreamURL: "http://localhost:3000",
 		Logger:      zerolog.New(io.Discard),
@@ -80,7 +70,8 @@ func TestNewClientDefaults(t *testing.T) {
 
 func TestNewClientReconnectMaxClamped(t *testing.T) {
 	c, err := New(Config{
-		ServerURL:    "http://localhost:8080",
+		Server:       "localhost",
+		ServerPort:   22,
 		Subdomain:    "foo",
 		UpstreamURL:  "http://localhost:3000",
 		Logger:       zerolog.New(io.Discard),
@@ -98,7 +89,8 @@ func TestNewClientReconnectMaxClamped(t *testing.T) {
 
 func TestBackoffDuration(t *testing.T) {
 	c, err := New(Config{
-		ServerURL:    "http://localhost:8080",
+		Server:       "localhost",
+		ServerPort:   22,
 		Subdomain:    "foo",
 		UpstreamURL:  "http://localhost:3000",
 		Logger:       zerolog.New(io.Discard),
@@ -125,7 +117,8 @@ func TestBackoffDuration(t *testing.T) {
 
 func TestBackoffDurationZeroAttempt(t *testing.T) {
 	c, err := New(Config{
-		ServerURL:    "http://localhost:8080",
+		Server:       "localhost",
+		ServerPort:   22,
 		Subdomain:    "foo",
 		UpstreamURL:  "http://localhost:3000",
 		Logger:       zerolog.New(io.Discard),
@@ -144,7 +137,8 @@ func TestBackoffDurationZeroAttempt(t *testing.T) {
 
 func TestNewClientNoTUI(t *testing.T) {
 	c, err := New(Config{
-		ServerURL:   "http://localhost:8080",
+		Server:      "localhost",
+		ServerPort:  22,
 		Subdomain:   "foo",
 		UpstreamURL: "http://localhost:3000",
 		Logger:      zerolog.New(io.Discard),
@@ -161,7 +155,8 @@ func TestNewClientNoTUI(t *testing.T) {
 
 func TestSendUINoOp(t *testing.T) {
 	c, err := New(Config{
-		ServerURL:   "http://localhost:8080",
+		Server:      "localhost",
+		ServerPort:  22,
 		Subdomain:   "foo",
 		UpstreamURL: "http://localhost:3000",
 		Logger:      zerolog.New(io.Discard),

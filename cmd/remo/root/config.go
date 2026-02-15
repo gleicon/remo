@@ -21,7 +21,6 @@ type serverFileConfig struct {
 	AutoReserve     *bool    `yaml:"reserve"`
 	AllowRandom     *bool    `yaml:"allow_random"`
 	AdminSecret     string   `yaml:"admin_secret"`
-	SSHHostKey      string   `yaml:"ssh_host_key"`
 }
 
 func loadServerConfig(path string) (*serverFileConfig, error) {

@@ -20,7 +20,6 @@ REMO_IDENTITY="$REMO_HOME/identity.json"
 REMO_AUTHORIZED="$REMO_CONFIG_DIR/authorized.keys"
 REMO_STATE="$REMO_VAR_DIR/state.db"
 REMO_SERVER_CONFIG="$REMO_CONFIG_DIR/server.yaml"
-REMO_SSH_HOST_KEY="$REMO_CONFIG_DIR/host_key"
 
 DOMAIN=""
 EMAIL=""
@@ -61,7 +60,6 @@ Options:
 File Locations:
   /etc/remo/server.yaml        Server configuration
   /etc/remo/authorized.keys    Authorized client keys
-  /etc/remo/host_key          SSH host key
   /etc/remo/fullchain.pem     TLS certificate
   /etc/remo/privkey.pem       TLS private key
   /var/lib/remo/state.db      SQLite database
@@ -95,17 +93,6 @@ ensure_directories() {
     chmod 755 "$REMO_VAR_DIR"
     mkdir -p "$REMO_HOME"
     chmod 700 "$REMO_HOME"
-}
-
-generate_ssh_host_key() {
-    if [ -f "$REMO_SSH_HOST_KEY" ]; then
-        info "SSH host key already exists: $REMO_SSH_HOST_KEY"
-        return
-    fi
-    info "Generating SSH host key"
-    ssh-keygen -t ed25519 -f "$REMO_SSH_HOST_KEY" -N "" -C "remo@$(hostname)"
-    chmod 600 "$REMO_SSH_HOST_KEY"
-    info "SSH host key generated: $REMO_SSH_HOST_KEY.pub"
 }
 
 install_remo_binary() {
@@ -274,7 +261,6 @@ write_server_config() {
 listen: "127.0.0.1:18080"
 domain: "$DOMAIN"
 mode: behind-proxy
-ssh_host_key: "$REMO_SSH_HOST_KEY"
 trusted_proxies:
   - "127.0.0.1/32"
 trusted_hops: 1
@@ -288,7 +274,6 @@ YAML
 listen: ":443"
 domain: "$DOMAIN"
 mode: standalone
-ssh_host_key: "$REMO_SSH_HOST_KEY"
 tls_cert: "$REMO_CERT_DIR/fullchain.pem"
 tls_key: "$REMO_CERT_DIR/privkey.pem"
 authorized: "$REMO_AUTHORIZED"
@@ -400,7 +385,6 @@ print_server_summary() {
     echo "  Config:          $REMO_SERVER_CONFIG"
     echo "  Authorized keys: $REMO_AUTHORIZED"
     echo "  State DB:        $REMO_STATE"
-    echo "  SSH host key:   $REMO_SSH_HOST_KEY"
     echo "  Admin secret:    $ADMIN_SECRET"
     echo ""
     if [ "$MODE" = "behind-proxy" ]; then
@@ -436,13 +420,12 @@ do_server() {
     [ -n "$DOMAIN" ] || die "--domain is required for server setup"
 
     ensure_directories
-    generate_ssh_host_key
     install_remo_binary
     setup_identity
     setup_authorized_keys
     setup_certs
     write_server_config
-    write_nginx_config
+    # write_nginx_config
     write_systemd_unit
     print_server_summary
 }
@@ -451,13 +434,12 @@ do_all() {
     [ -n "$DOMAIN" ] || die "--domain is required"
 
     ensure_directories
-    generate_ssh_host_key
     install_remo_binary
     setup_identity
     setup_authorized_keys
     setup_certs
     write_server_config
-    write_nginx_config
+    # write_nginx_config
     write_systemd_unit
     print_client_summary
     print_server_summary

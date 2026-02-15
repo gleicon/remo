@@ -5,39 +5,44 @@ import (
 	"sync"
 )
 
+type tunnelEntry struct {
+	port   int
+	pubKey string
+}
+
 type registry struct {
 	mu     sync.RWMutex
-	active map[string]*Tunnel
+	active map[string]*tunnelEntry
 }
 
 func newRegistry() *registry {
-	return &registry{active: make(map[string]*Tunnel)}
+	return &registry{active: make(map[string]*tunnelEntry)}
 }
 
-func (r *registry) register(subdomain string, t *Tunnel) bool {
+func (r *registry) register(subdomain string, port int, pubKey string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.active[subdomain]; exists {
 		return false
 	}
-	r.active[subdomain] = t
+	r.active[subdomain] = &tunnelEntry{port: port, pubKey: pubKey}
 	return true
 }
 
-func (r *registry) unregister(subdomain string, t *Tunnel) {
+func (r *registry) unregister(subdomain string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	current, ok := r.active[subdomain]
-	if ok && current == t {
-		delete(r.active, subdomain)
-	}
+	delete(r.active, subdomain)
 }
 
-func (r *registry) get(subdomain string) (*Tunnel, bool) {
+func (r *registry) get(subdomain string) (int, string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	t, ok := r.active[subdomain]
-	return t, ok
+	entry, ok := r.active[subdomain]
+	if !ok {
+		return 0, "", false
+	}
+	return entry.port, entry.pubKey, true
 }
 
 func (r *registry) has(subdomain string) bool {

@@ -1,8 +1,18 @@
 # remo
 
 Single-binary reverse tunnel that exposes local services through public
-`*.yourdomain.tld` subdomains. Runs standalone with its own TLS or behind an
-existing nginx/reverse-proxy on your VPS.
+`*.yourdomain.tld` subdomains. Uses SSH reverse tunnels (`ssh -R`) - the server
+just needs SSH daemon running (port 22) and an HTTP server.
+
+## Prerequisites
+
+### Server (VPS)
+- SSH daemon running on port 22
+- TLS certificate (or nginx in front)
+- Optionally: SQLite for state persistence
+
+### Client (laptop)
+- SSH key-based authentication to the server
 
 ## Installation
 
@@ -26,11 +36,17 @@ curl -sL https://raw.githubusercontent.com/gleicon/remo/main/scripts/remo-setup.
   --domain yourdomain.tld \
   --email you@example.com
 
+# Server with nginx and certs already configured
+curl -sL https://raw.githubusercontent.com/gleicon/remo/main/scripts/remo-setup.sh | bash -s -- server --behind-proxy --skip-certs \
+  --domain yourdomain.tld \
+  --email you@example.com
+
+
 # Client (laptop)
 curl -sL https://raw.githubusercontent.com/gleicon/remo/main/scripts/remo-setup.sh | bash -s -- client
 ```
 
-This creates the required directories, generates SSH host key, identity, config, and systemd unit.
+This creates the required directories, generates identity, config, and systemd unit.
 
 ## Quick start
 
@@ -39,10 +55,7 @@ This creates the required directories, generates SSH host key, identity, config,
 The setup script above handles everything. Or manually:
 
 ```bash
-# Generate SSH host key
-ssh-keygen -t ed25519 -f /etc/remo/host_key -N ""
-
-# Run server
+# Run server (listens on port 443 with TLS)
 remo server --config /etc/remo/server.yaml
 ```
 
@@ -268,11 +281,11 @@ remo reservations list --state /var/lib/remo/state.db
 
 ## How it works
 
-1. Client connects to server via SSH and opens a `remo-proxy` channel
-2. Client sends signed `Hello` with subdomain claim
-3. Server validates signature against authorized keys, registers tunnel
-4. HTTP requests to `subdomain.yourdomain.tld` are proxied over SSH to the client
-5. Client forwards to local upstream and returns response
+1. Client connects to server via SSH (port 22) using its identity key
+2. Client opens a reverse tunnel (`ssh -R`) - listens on a local port on the server
+3. Client registers subdomain and port via HTTP POST to the server
+4. Server proxies HTTP requests for `subdomain.yourdomain.tld` to the tunnel port
+5. SSH tunnel forwards traffic to the client's local upstream
 
 ---
 
@@ -295,11 +308,13 @@ Local testing without TLS:
 # Terminal 1: upstream
 python3 -m http.server 3000
 
-# Terminal 2: server (behind-proxy mode)
+# Terminal 2: server (behind-proxy mode, SSH must be running on localhost:22)
+# The server proxies to SSH tunnel ports
 remo server --config /etc/remo/server.yaml
 
 # Terminal 3: client
-remo connect --server user@localhost:22 --subdomain test --upstream http://127.0.0.1:3000
+# Connects via SSH and establishes reverse tunnel
+remo connect --server localhost --subdomain test --upstream http://127.0.0.1:3000
 
 # Terminal 4: test
 curl -H "Host: test.yourdomain.tld" http://localhost:18080/
@@ -312,5 +327,3 @@ curl -H "Host: test.yourdomain.tld" http://localhost:18080/
 - TLS certificates should be mode 600: `chmod 600 /etc/remo/*.pem`
 - Identity file is mode 600: `chmod 600 ~/.remo/identity.json`
 - Authorized keys file is mode 600: `chmod 600 /etc/remo/authorized.keys`
-- The SSH server needs a host key — generate one with:
-  `ssh-keygen -t ed25519 -f /etc/remo/host_key`

@@ -29,7 +29,7 @@ func newStatusCommand(r *rootCommand) *cobra.Command {
 			return runStatus(r, opts, cmd.OutOrStdout())
 		},
 	}
-	cmd.Flags().StringVar(&opts.server, "server", "https://127.0.0.1", "base server url (https)")
+	cmd.Flags().StringVar(&opts.server, "server", "http://127.0.0.1:18080", "base server url")
 	cmd.Flags().StringVar(&opts.secret, "secret", "", "admin secret for authorization")
 	cmd.Flags().BoolVar(&opts.metrics, "metrics", false, "fetch Prometheus metrics instead of JSON status")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 5*time.Second, "request timeout")
@@ -79,8 +79,8 @@ func buildStatusURL(base string, metrics bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if u.Scheme != "https" {
-		return "", errors.New("server url must use https")
+	if u.Scheme == "" {
+		u.Scheme = "http"
 	}
 	path := "/status"
 	if metrics {

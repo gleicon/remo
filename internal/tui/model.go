@@ -14,6 +14,7 @@ const maxLogs = 100
 
 type Model struct {
 	subdomain   string
+	url         string
 	connected   bool
 	attempt     int
 	backoff     time.Duration
@@ -34,6 +35,10 @@ type StateMsg struct {
 	Attempt   int
 	Backoff   time.Duration
 	Err       string
+}
+
+type URLMsg struct {
+	URL string
 }
 
 type RequestLogMsg struct {
@@ -68,6 +73,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.attempt = msg.Attempt
 		m.backoff = msg.Backoff
 		m.lastError = msg.Err
+	case URLMsg:
+		m.url = msg.URL
 	case RequestLogMsg:
 		if !m.paused {
 			m.logs = append(m.logs, msg)
@@ -109,6 +116,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var b strings.Builder
 	status := lipgloss.NewStyle().Bold(true)
+	url := lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	stateText := "disconnected"
 	if m.connected {
 		stateText = "connected"
@@ -129,6 +137,9 @@ func (m Model) View() string {
 	statusLine += fmt.Sprintf(" | req %d err %d bytes %d/%d avg %.1fms", m.stats.requests, m.stats.errors, m.stats.bytesIn, m.stats.bytesOut, m.stats.avgLatency())
 	b.WriteString(status.Render(statusLine))
 	b.WriteString("\n")
+	if m.url != "" {
+		b.WriteString(url.Render("→ " + m.url + "\n"))
+	}
 	b.WriteString("Recent requests\n")
 	if m.filter != "" {
 		b.WriteString(fmt.Sprintf("filter: %s\n", m.filter))
