@@ -33,16 +33,16 @@
 ### Nginx Integration
 
 - [ ] **NGX-01**: Server runs in "behind-proxy" mode (no TLS)
-- [ ] **NGX-02**: Nginx config example for `*.domain.com` wildcard
-- [ ] **NGX-03**: Documentation for nginx + let's encrypt setup
+- [x] **NGX-02**: Nginx config example for `*.domain.com` wildcard
+- [x] **NGX-03**: Documentation for nginx + let's encrypt setup
 
 ### Admin & Docs
 
 - [ ] **ADM-01**: `/healthz` endpoint returns 200 OK
 - [ ] **ADM-02**: `/status` endpoint returns tunnel list (with auth)
 - [ ] **ADM-03**: `/metrics` endpoint returns Prometheus format (with auth)
-- [ ] **DOC-01**: README with quick start and nginx setup
-- [ ] **DOC-02**: SSH key setup documentation
+- [x] **DOC-01**: README with quick start and nginx setup
+- [x] **DOC-02**: SSH key setup documentation
 
 ## v2 Requirements
 
@@ -96,13 +96,13 @@
 | SRV-04 | Phase 1 | ✓ Exists |
 | SRV-05 | Phase 1 | ✓ Exists |
 | NGX-01 | Phase 3 | ✓ Exists |
-| NGX-02 | Phase 3 | Pending |
-| NGX-03 | Phase 3 | Pending |
+| NGX-02 | Phase 3 | Complete |
+| NGX-03 | Phase 3 | Complete |
 | ADM-01 | Phase 3 | ✓ Exists |
 | ADM-02 | Phase 3 | ✓ Exists |
 | ADM-03 | Phase 3 | ✓ Exists |
-| DOC-01 | Phase 3 | Pending |
-| DOC-02 | Phase 3 | Pending |
+| DOC-01 | Phase 3 | Complete |
+| DOC-02 | Phase 3 | Complete |
 
 **Coverage:**
 - v1 requirements: 22 total

@@ -1,21 +1,22 @@
 # State: Remo Project
 
-**Project:** Remo  
+**Project:** Remo
 **Current Phase:** 03
-**Current Plan:** 01
-**Last Action:** Completed 03-nginx-documentation-01-PLAN.md - Nginx config and SSH setup documentation
+**Current Plan:** 02
+**Last Action:** Completed 03-nginx-documentation-02-PLAN.md - README rewrite with comprehensive documentation
 **Updated:** 2026-02-19
 
 ---
 
 ## Current Position
 
-Plan 01 complete: Created comprehensive nginx and SSH documentation for production deployment.
+Plan 02 complete: Rewrote README.md with comprehensive documentation including architecture diagram, quick start, TUI documentation, and cross-references.
 
 - docs/nginx-example.conf: Production nginx config with wildcard subdomain SSL and WebSocket support
 - docs/nginx.md: Complete Let's Encrypt setup guide with DNS wildcard instructions
 - docs/ssh-setup.md: SSH key generation, authorization, and subdomain restriction guide
-- Requirements NGX-02, NGX-03, DOC-02 addressed
+- README.md: Comprehensive documentation with ASCII architecture diagram, quick start, TUI docs, admin auth, and troubleshooting
+- Requirements NGX-02, NGX-03, DOC-01, DOC-02 addressed
 
 **Next:** Phase 03 complete - all plans finished
 
@@ -27,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 
 **Core value:** Users can expose local services through public subdomains using only system SSH, with minimal client complexity
 
-**Current focus:** Phase 3 — Nginx Documentation (1/1 plans complete)
+**Current focus:** Phase 3 — Nginx Documentation (2/2 plans complete)
 
 ---
 
@@ -37,7 +38,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 |-------|--------|--------------|-------|
 | 1 | ✓ Complete | 6 | 1/1 |
 | 2 | ✓ Complete | 7 | 5/5 |
-| 3 | ✓ Complete | 3 | 1/1 |
+| 3 | ✓ Complete | 3 | 2/2 |
 
 ---
 
@@ -58,6 +59,9 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 13. **Terminal height adaptation** — Reserve 3 header + 1 footer lines, use remaining space for logs
 14. **Export prompt state machine** — exportPrompt flag intercepts all key input until resolved
 15. **Error filter predicate** — shouldShowEntry() combines text filter and error-only filter
+16. **ASCII architecture diagram** — Portable, renders everywhere without external dependencies
+17. **README structure** — Header → What is → Quick Start → How It Works → Configuration → Troubleshooting
+18. **Security documentation** — Explicit localhost-only /events access documented
 
 ---
 
@@ -73,7 +77,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 ## Session Continuity
 
 **Started:** 2026-02-18
-**Last Session:** 2026-02-19T19:14:16.388Z
-**Context:** Completed 03-nginx-documentation-01-PLAN.md. Created nginx config example, Let's Encrypt setup guide, and SSH key documentation.
+**Last Session:** 2026-02-19T19:18:58Z
+**Context:** Completed 03-nginx-documentation-02-PLAN.md. Rewrote README with comprehensive documentation including architecture diagram, TUI docs, and cross-references.
 
 ---
