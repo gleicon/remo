@@ -297,6 +297,24 @@ func (s *Server) validateSubdomain(name string) bool {
 	return true
 }
 
+// recordingResponseWriter wraps http.ResponseWriter to capture status code and bytes written
+type recordingResponseWriter struct {
+	http.ResponseWriter
+	statusCode   int
+	bytesWritten int
+}
+
+func (rw *recordingResponseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *recordingResponseWriter) Write(b []byte) (int, error) {
+	n, err := rw.ResponseWriter.Write(b)
+	rw.bytesWritten += n
+	return n, err
+}
+
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	subdomain := s.extractSubdomain(r.Host)
 	if subdomain == "" {
@@ -333,8 +351,32 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 	}
 
-	proxy.ServeHTTP(w, r)
-	s.metrics.Record(subdomain, 0, 0, time.Since(start), false)
+	rw := &recordingResponseWriter{ResponseWriter: w}
+	proxy.ServeHTTP(rw, r)
+	latency := time.Since(start)
+
+	s.metrics.Record(subdomain, int64(r.ContentLength), int64(rw.bytesWritten), latency, rw.statusCode >= 500)
+
+	s.recordEvent(RequestEvent{
+		Time:     time.Now(),
+		Method:   r.Method,
+		Path:     r.URL.RequestURI(),
+		Status:   rw.statusCode,
+		Latency:  latency,
+		Remote:   remoteAddr,
+		BytesIn:  int(r.ContentLength),
+		BytesOut: rw.bytesWritten,
+	})
+}
+
+// recordEvent adds a request event to the circular buffer
+func (s *Server) recordEvent(evt RequestEvent) {
+	s.eventsMu.Lock()
+	defer s.eventsMu.Unlock()
+	s.requestEvents = append(s.requestEvents, evt)
+	if len(s.requestEvents) > s.maxEvents {
+		s.requestEvents = s.requestEvents[len(s.requestEvents)-s.maxEvents:]
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
