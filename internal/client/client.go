@@ -449,3 +449,49 @@ func (c *Client) startEventPolling(ctx context.Context) {
 		}
 	}()
 }
+
+func (c *Client) pollAndForwardEvents() error {
+	// Fetch events from server through the tunnel
+	resp, err := c.eventsClient.Get("http://127.0.0.1:18080/events")
+	if err != nil {
+		return fmt.Errorf("fetch events: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("events endpoint returned %d", resp.StatusCode)
+	}
+
+	var events []struct {
+		Time     time.Time     `json:"time"`
+		Method   string        `json:"method"`
+		Path     string        `json:"path"`
+		Status   int           `json:"status"`
+		Latency  time.Duration `json:"latency"`
+		Remote   string        `json:"remote"`
+		BytesIn  int           `json:"bytes_in"`
+		BytesOut int           `json:"bytes_out"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		return fmt.Errorf("decode events: %w", err)
+	}
+
+	// Forward new events to TUI
+	for i := c.lastEventIndex; i < len(events); i++ {
+		evt := events[i]
+		c.sendUI(tui.RequestLogMsg{
+			Time:     evt.Time,
+			Method:   evt.Method,
+			Path:     evt.Path,
+			Status:   evt.Status,
+			Latency:  evt.Latency,
+			Remote:   evt.Remote,
+			BytesIn:  evt.BytesIn,
+			BytesOut: evt.BytesOut,
+		})
+	}
+
+	c.lastEventIndex = len(events)
+	return nil
+}
