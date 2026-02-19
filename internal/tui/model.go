@@ -92,7 +92,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stats.apply(msg)
 		}
 	case QuitMsg:
-		// Client will handle the actual shutdown
 		m.quitting = true
 		return m, tea.Quit
 	case tea.KeyMsg:
@@ -110,7 +109,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, cmd
 		}
-		// Handle export prompt first
 		if m.exportPrompt {
 			switch msg.String() {
 			case "y", "Y":
@@ -135,6 +133,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.paused = !m.paused
 		case "c", "C":
 			m.logs = nil
+			m.stats = SessionStats{}
 		case "e", "E":
 			m.showErrorsOnly = !m.showErrorsOnly
 		case "/":
@@ -145,28 +144,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) shouldShowEntry(entry RequestLogMsg) bool {
-	if m.filter != "" && !strings.Contains(entry.Path, m.filter) {
-		return false
-	}
-	if m.showErrorsOnly && entry.Status < 400 {
-		return false
-	}
-	return true
-}
-
 func statusColor(status int) lipgloss.Color {
 	switch {
 	case status >= 200 && status < 300:
-		return lipgloss.Color("42") // Green
+		return lipgloss.Color("42")
 	case status >= 300 && status < 400:
-		return lipgloss.Color("33") // Blue
+		return lipgloss.Color("33")
 	case status >= 400 && status < 500:
-		return lipgloss.Color("220") // Yellow
+		return lipgloss.Color("220")
 	case status >= 500:
-		return lipgloss.Color("196") // Red
+		return lipgloss.Color("196")
 	default:
-		return lipgloss.Color("255") // White
+		return lipgloss.Color("255")
 	}
 }
 
@@ -192,12 +181,11 @@ func (m Model) helpFooter() string {
 }
 
 func (m Model) View() string {
-	// Handle quitting state first
 	if m.quitting {
 		if m.exportPrompt {
-			return "Export session log to file? (y/n)\n"
+			return "Export session log to file? (y/n)"
 		}
-		return "Shutting down...\n"
+		return "Shutting down..."
 	}
 
 	var b strings.Builder
@@ -218,14 +206,16 @@ func (m Model) View() string {
 		statusLine += " | paused"
 	}
 	if m.showErrorsOnly {
-		statusLine += " | errors only"
+		statusLine += " | errors"
 	}
-	statusLine += fmt.Sprintf(" | req %d err %d bytes %d/%d avg %.1fms", m.stats.requests, m.stats.errors, m.stats.bytesIn, m.stats.bytesOut, m.stats.avgLatency())
+	statusLine += fmt.Sprintf(" | req %d err %d bytes %d/%d avg %.1fms", m.stats.RequestCount, m.stats.ErrorCount, m.stats.BytesIn, m.stats.BytesOut, m.stats.avgLatency())
 	b.WriteString(status.Render(statusLine))
 	b.WriteString("\n")
 	if m.url != "" {
 		b.WriteString(url.Render("→ " + m.url + "\n"))
 	}
+	b.WriteString(m.statsLine())
+	b.WriteString("\n")
 	b.WriteString("Recent requests\n")
 	if m.filter != "" {
 		b.WriteString(fmt.Sprintf("filter: %s\n", m.filter))
@@ -241,8 +231,7 @@ func (m Model) View() string {
 		return b.String()
 	}
 
-	// Calculate available lines for logs
-	headerLines := 3
+	headerLines := 4
 	footerLines := 1
 	filterLine := 0
 	if m.filter != "" {
@@ -250,13 +239,16 @@ func (m Model) View() string {
 	}
 	availableLines := m.height - headerLines - footerLines - filterLine
 	if availableLines < 5 {
-		availableLines = 5 // Minimum
+		availableLines = 5
 	}
 
 	count := 0
 	for i := len(m.logs) - 1; i >= 0 && count < availableLines; i-- {
 		entry := m.logs[i]
-		if !m.shouldShowEntry(entry) {
+		if m.showErrorsOnly && entry.Status < 400 {
+			continue
+		}
+		if m.filter != "" && !strings.Contains(entry.Path, m.filter) {
 			continue
 		}
 
@@ -304,29 +296,46 @@ func formatDuration(d time.Duration) string {
 	return d.Truncate(100 * time.Millisecond).String()
 }
 
-type stats struct {
-	requests uint64
-	errors   uint64
-	bytesIn  uint64
-	bytesOut uint64
-	latency  time.Duration
+type SessionStats struct {
+	RequestCount int
+	ErrorCount   int
+	BytesIn      int64
+	BytesOut     int64
+	TotalLatency time.Duration
 }
 
-func (s *stats) apply(msg RequestLogMsg) {
-	s.requests++
-	s.bytesIn += uint64(max(0, msg.BytesIn))
-	s.bytesOut += uint64(max(0, msg.BytesOut))
-	s.latency += msg.Latency
+func (s *SessionStats) apply(msg RequestLogMsg) {
+	s.RequestCount++
+	s.BytesIn += int64(max(0, msg.BytesIn))
+	s.BytesOut += int64(max(0, msg.BytesOut))
+	s.TotalLatency += msg.Latency
 	if msg.Status >= 400 {
-		s.errors++
+		s.ErrorCount++
 	}
 }
 
-func (s *stats) avgLatency() float64 {
-	if s.requests == 0 {
+func (s *SessionStats) avgLatency() float64 {
+	if s.RequestCount == 0 {
 		return 0
 	}
-	return float64(s.latency.Microseconds()) / float64(s.requests) / 1000
+	return float64(s.TotalLatency.Microseconds()) / float64(s.RequestCount) / 1000
+}
+
+func (m Model) statsLine() string {
+	avgLatency := time.Duration(0)
+	if m.stats.RequestCount > 0 {
+		avgLatency = m.stats.TotalLatency / time.Duration(m.stats.RequestCount)
+	}
+
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	statsText := fmt.Sprintf("req %d err %d bytes %d/%d avg %dms",
+		m.stats.RequestCount,
+		m.stats.ErrorCount,
+		m.stats.BytesIn,
+		m.stats.BytesOut,
+		avgLatency.Milliseconds(),
+	)
+	return style.Render(statsText)
 }
 
 func max(a, b int) int {
