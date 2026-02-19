@@ -49,13 +49,28 @@ type Config struct {
 }
 
 type Server struct {
-	cfg        Config
-	log        zerolog.Logger
-	registry   *registry
-	store      *store.Store
-	started    time.Time
-	metrics    *metrics
-	httpClient *http.Client
+	cfg           Config
+	log           zerolog.Logger
+	registry      *registry
+	store         *store.Store
+	started       time.Time
+	metrics       *metrics
+	httpClient    *http.Client
+	requestEvents []RequestEvent
+	eventsMu      sync.RWMutex
+	maxEvents     int
+}
+
+// RequestEvent represents a captured HTTP request for TUI logging
+type RequestEvent struct {
+	Time     time.Time     `json:"time"`
+	Method   string        `json:"method"`
+	Path     string        `json:"path"`
+	Status   int           `json:"status"`
+	Latency  time.Duration `json:"latency"`
+	Remote   string        `json:"remote"`
+	BytesIn  int           `json:"bytes_in"`
+	BytesOut int           `json:"bytes_out"`
 }
 
 func New(cfg Config) *Server {
@@ -69,12 +84,14 @@ func New(cfg Config) *Server {
 		cfg.TrustedHops = 1
 	}
 	return &Server{
-		cfg:      cfg,
-		log:      cfg.Logger,
-		registry: newRegistry(),
-		store:    cfg.Store,
-		started:  time.Now(),
-		metrics:  newMetrics(),
+		cfg:           cfg,
+		log:           cfg.Logger,
+		registry:      newRegistry(),
+		store:         cfg.Store,
+		started:       time.Now(),
+		metrics:       newMetrics(),
+		requestEvents: make([]RequestEvent, 0, 100),
+		maxEvents:     100,
 		httpClient: &http.Client{
 			Timeout: cfg.ReadTimeout,
 			Transport: &http.Transport{
