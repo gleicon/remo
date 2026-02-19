@@ -7,12 +7,12 @@
 
 ### Client (SSH + Registration)
 
-- [ ] **CLI-01**: Client launches `ssh -R 0:localhost:SERVER_PORT` to auto-assign remote port
-- [ ] **CLI-02**: Client parses SSH output to detect assigned remote port
-- [ ] **CLI-03**: Client registers subdomain with server through tunnel
-- [ ] **CLI-04**: Client monitors SSH process and reconnects on failure
-- [ ] **CLI-05**: Client identity loaded from `~/.remo/identity.json`
-- [ ] **CLI-06**: Remove internal SSH dialer code
+- [x] **CLI-01**: Client launches `ssh -R 0:localhost:SERVER_PORT` to auto-assign remote port
+- [x] **CLI-02**: Client parses SSH output to detect assigned remote port
+- [x] **CLI-03**: Client registers subdomain with server through tunnel
+- [x] **CLI-04**: Client monitors SSH process and reconnects on failure
+- [x] **CLI-05**: Client identity loaded from `~/.remo/identity.json`
+- [x] **CLI-06**: Remove internal SSH dialer code
 
 ### TUI (Request Log Dashboard)
 
@@ -79,12 +79,12 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CLI-01 | Phase 1 | Pending |
-| CLI-02 | Phase 1 | Pending |
-| CLI-03 | Phase 1 | Pending |
-| CLI-04 | Phase 1 | Pending |
-| CLI-05 | Phase 1 | Pending |
-| CLI-06 | Phase 1 | Pending |
+| CLI-01 | Phase 1 | ✓ Complete (01-01) |
+| CLI-02 | Phase 1 | ✓ Complete (01-01) |
+| CLI-03 | Phase 1 | ✓ Complete (01-01) |
+| CLI-04 | Phase 1 | ✓ Complete (01-01) |
+| CLI-05 | Phase 1 | ✓ Complete (01-01) |
+| CLI-06 | Phase 1 | ✓ Complete (01-01) |
 | TUI-01 | Phase 2 | Pending |
 | TUI-02 | Phase 2 | Pending |
 | TUI-03 | Phase 2 | Pending |

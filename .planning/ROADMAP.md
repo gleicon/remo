@@ -12,7 +12,7 @@
 **Plans:** 1 plan in 1 wave
 
 Plans:
-- [ ] 01-01-PLAN.md — Rewrite client to use external ssh command
+- [x] 01-01-PLAN.md — Rewrite client to use external ssh command (complete 2026-02-19)
 
 
 **Goal:** Replace internal SSH dialer with external `ssh -R` command
@@ -105,6 +105,7 @@ Plans:
 
 ## Progress Tracking
 
+- [x] Phase 1 Plan 01 complete (2026-02-19) — SSH client rewritten
 - [ ] Phase 1 complete
 - [ ] Phase 2 complete
 - [ ] Phase 3 complete
@@ -126,4 +127,4 @@ Plans:
 - Fallback behavior if ssh not found
 
 ---
-*Last updated: 2026-02-18*
+*Last updated: 2026-02-19*
