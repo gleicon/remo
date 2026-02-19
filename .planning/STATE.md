@@ -2,24 +2,24 @@
 
 **Project:** Remo  
 **Current Phase:** 02
-**Current Plan:** 02 Complete
-**Last Action:** Completed 02-tui-request-logging-02-PLAN.md - TUI HTTP client polling with event forwarding
+**Current Plan:** 03 Complete
+**Last Action:** Completed 02-tui-request-logging-03-PLAN.md - TUI visual enhancements with color-coded status codes
 **Updated:** 2026-02-19
 
 ---
 
 ## Current Position
 
-Plan 02 complete: Client now polls /events endpoint and forwards request logs to TUI.
+Plan 03 complete: TUI now has visual enhancements with color-coded status codes, path wrapping, and dynamic height.
 
-- Client polls http://127.0.0.1:18080/events every second through SSH tunnel
-- Events fetched as JSON and converted to tui.RequestLogMsg
-- New events forwarded to TUI via sendUI() helper
-- Exponential backoff on poll failures
-- Polling stops when context is cancelled (disconnect/shutdown)
-- Requirements TUI-01 and TUI-02 addressed
+- Status codes color-coded (2xx green, 3xx blue, 4xx yellow, 5xx red)
+- Long paths wrap to multiple lines instead of truncating
+- Help footer shows all key bindings: q:quit c:clear e:errors p:pause /:filter
+- Log display uses available terminal height dynamically
+- TUI quit key now functional ('q' to quit)
+- Requirements TUI-03 addressed
 
-**Next:** Phase 02, Plan 03 — TUI request log display improvements
+**Next:** Phase 02, Plan 04 — Error display and filtering improvements
 
 ---
 
@@ -38,7 +38,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 | Phase | Status | Requirements | Plans |
 |-------|--------|--------------|-------|
 | 1 | ✓ Complete | 6 | 1/1 |
-| 2 | ○ In Progress | 7 | 2/5 |
+| 2 | ○ In Progress | 7 | 3/5 |
 | 3 | ○ Not started | 3 | 0/1 |
 
 ---
@@ -51,21 +51,24 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 4. **Recording response writer** — Wraps http.ResponseWriter to capture status and bytes
 5. **Polling interval** — 1 second polling balances real-time feel with resource usage
 6. **Event deduplication** — lastEventIndex prevents duplicate forwarding to TUI
+7. **Status code color scheme** — Green 2xx, Blue 3xx, Yellow 4xx, Red 5xx per HTTP conventions
+8. **Path wrapping** — Multi-line display for paths >40 chars instead of truncation
+9. **Terminal height adaptation** — Reserve 3 header + 1 footer lines, use remaining space for logs
 
 ---
 
 ## Open Issues
 
 1. ✓ SSH tunnel hangs — **FIXED** by using external ssh command (Plan 01)
-2. TUI quit key missing — Fix planned for Phase 2
+2. ✓ TUI quit key missing — **FIXED** 'q' key now quits the TUI (Plan 03)
 3. ⚡ Request logs not showing — **IN PROGRESS** — Client now polls and forwards, TUI display pending
 
 ---
 
 ## Session Continuity
 
-**Started:** 2026-02-18  
-**Last Session:** 2026-02-19T02:19:33Z
-**Context:** Completed 02-tui-request-logging-02-PLAN.md. Client now polls /events and forwards to TUI.
+**Started:** 2026-02-18
+**Last Session:** 2026-02-19T02:34:00Z
+**Context:** Completed 02-tui-request-logging-03-PLAN.md. TUI now has color-coded status codes, path wrapping, help footer, and dynamic height.
 
 ---
