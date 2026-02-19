@@ -9,6 +9,12 @@
 
 ## Phase 1: SSH Client Rewrite
 
+**Plans:** 1 plan in 1 wave
+
+Plans:
+- [ ] 01-01-PLAN.md — Rewrite client to use external ssh command
+
+
 **Goal:** Replace internal SSH dialer with external `ssh -R` command
 
 **Requirements:** CLI-01, CLI-02, CLI-03, CLI-04, CLI-05, CLI-06
