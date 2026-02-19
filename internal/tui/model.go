@@ -113,6 +113,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func statusColor(status int) lipgloss.Color {
+	switch {
+	case status >= 200 && status < 300:
+		return lipgloss.Color("42") // Green
+	case status >= 300 && status < 400:
+		return lipgloss.Color("33") // Blue
+	case status >= 400 && status < 500:
+		return lipgloss.Color("220") // Yellow
+	case status >= 500:
+		return lipgloss.Color("196") // Red
+	default:
+		return lipgloss.Color("255") // White
+	}
+}
+
+func wrapPath(path string, maxWidth int) []string {
+	if len(path) <= maxWidth {
+		return []string{path}
+	}
+	var lines []string
+	for len(path) > 0 {
+		if len(path) <= maxWidth {
+			lines = append(lines, path)
+			break
+		}
+		lines = append(lines, path[:maxWidth])
+		path = path[maxWidth:]
+	}
+	return lines
+}
+
 func (m Model) View() string {
 	var b strings.Builder
 	status := lipgloss.NewStyle().Bold(true)
@@ -161,8 +192,21 @@ func (m Model) View() string {
 		if m.filter != "" && !strings.Contains(entry.Path, m.filter) {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("  %s | %-4s %-40s %3d | %s\n",
-			entry.Time.Format("15:04:05"), entry.Method, truncate(entry.Path, 40), entry.Status, formatDuration(entry.Latency)))
+
+		statusStyle := lipgloss.NewStyle().Foreground(statusColor(entry.Status)).Bold(true)
+		lines := wrapPath(entry.Path, 40)
+		for j, line := range lines {
+			if j == 0 {
+				b.WriteString(fmt.Sprintf("  %s | %-4s %-40s %s | %s\n",
+					entry.Time.Format("15:04:05"),
+					entry.Method,
+					line,
+					statusStyle.Render(fmt.Sprintf("%3d", entry.Status)),
+					formatDuration(entry.Latency)))
+			} else {
+				b.WriteString(fmt.Sprintf("  %s      %s\n", strings.Repeat(" ", 8), line))
+			}
+		}
 		count++
 	}
 	return b.String()
