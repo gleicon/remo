@@ -13,21 +13,24 @@ import (
 const maxLogs = 100
 
 type Model struct {
-	subdomain   string
-	url         string
-	connected   bool
-	attempt     int
-	backoff     time.Duration
-	lastError   string
-	logs        []RequestLogMsg
-	width       int
-	height      int
-	paused      bool
-	errorsOnly  bool
-	filter      string
-	filtering   bool
-	filterInput textinput.Model
-	stats       stats
+	subdomain    string
+	url          string
+	connected    bool
+	attempt      int
+	backoff      time.Duration
+	lastError    string
+	logs         []RequestLogMsg
+	width        int
+	height       int
+	paused       bool
+	errorsOnly   bool
+	filter       string
+	filtering    bool
+	filterInput  textinput.Model
+	stats        stats
+	quitting     bool
+	exportPrompt bool
+	exportAnswer string
 }
 
 type StateMsg struct {
@@ -50,6 +53,11 @@ type RequestLogMsg struct {
 	Remote   string
 	BytesIn  int
 	BytesOut int
+}
+
+type QuitMsg struct {
+	Export   bool
+	FilePath string
 }
 
 func NewModel(subdomain string) Model {
@@ -83,6 +91,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.stats.apply(msg)
 		}
+	case QuitMsg:
+		// Client will handle the actual shutdown
+		m.quitting = true
+		return m, tea.Quit
 	case tea.KeyMsg:
 		if m.filtering {
 			var cmd tea.Cmd
@@ -98,9 +110,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, cmd
 		}
+		// Handle export prompt first
+		if m.exportPrompt {
+			switch msg.String() {
+			case "y", "Y":
+				m.exportAnswer = "y"
+				m.exportPrompt = false
+				return m, func() tea.Msg { return QuitMsg{Export: true} }
+			case "n", "N", "esc":
+				m.exportPrompt = false
+				return m, func() tea.Msg { return QuitMsg{Export: false} }
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "q", "Q":
-			return m, tea.Quit
+			if !m.quitting {
+				m.quitting = true
+				m.exportPrompt = true
+				return m, nil
+			}
 		case "p", "P":
 			m.paused = !m.paused
 		case "c", "C":
@@ -152,6 +182,14 @@ func (m Model) helpFooter() string {
 }
 
 func (m Model) View() string {
+	// Handle quitting state first
+	if m.quitting {
+		if m.exportPrompt {
+			return "Export session log to file? (y/n)\n"
+		}
+		return "Shutting down...\n"
+	}
+
 	var b strings.Builder
 	status := lipgloss.NewStyle().Bold(true)
 	url := lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
