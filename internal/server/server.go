@@ -122,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/", s.handleProxy)
 	return mux
 }
@@ -406,6 +407,31 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "remo_active_tunnels %d\n", status.ActiveTunnels)
 	fmt.Fprintf(w, "remo_authorized_keys %d\n", status.AuthorizedKeys)
 	fmt.Fprintf(w, "remo_reservations %d\n", status.Reservations)
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Only allow access through tunnel (localhost)
+	remoteAddr := s.peerAddress(r)
+	isLocalhost := remoteAddr == "127.0.0.1" || remoteAddr == "::1" || remoteAddr == "localhost"
+	if !isLocalhost {
+		http.Error(w, "unauthorized", http.StatusForbidden)
+		return
+	}
+
+	s.eventsMu.RLock()
+	events := make([]RequestEvent, len(s.requestEvents))
+	copy(events, s.requestEvents)
+	s.eventsMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(events); err != nil {
+		s.log.Error().Err(err).Msg("failed to encode events")
+	}
 }
 
 func (s *Server) extractSubdomain(host string) string {
