@@ -44,8 +44,8 @@ Plans:
 **Plans:** 5 plans in 3 waves
 
 Plans:
-- [ ] 02-tui-request-logging-01-PLAN.md — Server request event capture and /events endpoint
-- [ ] 02-tui-request-logging-02-PLAN.md — Client event polling and TUI forwarding
+- [x] 02-tui-request-logging-01-PLAN.md — Server request event capture and /events endpoint (complete 2026-02-19)
+- [x] 02-tui-request-logging-02-PLAN.md — Client event polling and TUI forwarding (complete 2026-02-19)
 - [ ] 02-tui-request-logging-03-PLAN.md — TUI core display: colors, path wrapping, help footer
 - [ ] 02-tui-request-logging-04-PLAN.md — Keyboard controls: quit with export, error filter, pause
 - [ ] 02-tui-request-logging-05-PLAN.md — Session statistics tracking and JSON log export
@@ -115,7 +115,9 @@ Plans:
 ## Progress Tracking
 
 - [x] Phase 1 Plan 01 complete (2026-02-19) — SSH client rewritten
-- [ ] Phase 1 complete
+- [x] Phase 1 complete
+- [x] Phase 2 Plan 01 complete (2026-02-19) — Server request event capture
+- [x] Phase 2 Plan 02 complete (2026-02-19) — Client event polling
 - [ ] Phase 2 complete
 - [ ] Phase 3 complete
 
