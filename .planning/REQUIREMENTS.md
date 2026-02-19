@@ -26,7 +26,7 @@
 
 - [ ] **SRV-01**: Server accepts registration via HTTP through tunnel
 - [ ] **SRV-02**: Server routes requests by subdomain to tunnel port
-- [ ] **SRV-03**: Server emits request events for TUI consumption
+- [x] **SRV-03**: Server emits request events for TUI consumption
 - [ ] **SRV-04**: Server works behind nginx (X-Forwarded-For handling)
 - [ ] **SRV-05**: Server validates client public key on registration
 
@@ -92,7 +92,7 @@
 | TUI-05 | Phase 2 | Pending |
 | SRV-01 | Phase 1 | ✓ Exists |
 | SRV-02 | Phase 1 | ✓ Exists |
-| SRV-03 | Phase 2 | Pending |
+| SRV-03 | Phase 2 | Complete |
 | SRV-04 | Phase 1 | ✓ Exists |
 | SRV-05 | Phase 1 | ✓ Exists |
 | NGX-01 | Phase 3 | ✓ Exists |
