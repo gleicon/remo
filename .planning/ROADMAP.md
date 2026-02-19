@@ -41,12 +41,14 @@ Plans:
 
 ## Phase 2: TUI & Request Logging
 
-**Plans:** 3 plans in 2 waves
+**Plans:** 5 plans in 3 waves
 
 Plans:
 - [ ] 02-tui-request-logging-01-PLAN.md — Server request event capture and /events endpoint
 - [ ] 02-tui-request-logging-02-PLAN.md — Client event polling and TUI forwarding
-- [ ] 02-tui-request-logging-03-PLAN.md — TUI display improvements and quit behavior
+- [ ] 02-tui-request-logging-03-PLAN.md — TUI core display: colors, path wrapping, help footer
+- [ ] 02-tui-request-logging-04-PLAN.md — Keyboard controls: quit with export, error filter, pause
+- [ ] 02-tui-request-logging-05-PLAN.md — Session statistics tracking and JSON log export
 
 **Goal:** Working TUI dashboard showing live request log
 
