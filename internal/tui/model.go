@@ -13,24 +13,24 @@ import (
 const maxLogs = 100
 
 type Model struct {
-	subdomain    string
-	url          string
-	connected    bool
-	attempt      int
-	backoff      time.Duration
-	lastError    string
-	logs         []RequestLogMsg
-	width        int
-	height       int
-	paused       bool
-	errorsOnly   bool
-	filter       string
-	filtering    bool
-	filterInput  textinput.Model
-	stats        stats
-	quitting     bool
-	exportPrompt bool
-	exportAnswer string
+	subdomain      string
+	url            string
+	connected      bool
+	attempt        int
+	backoff        time.Duration
+	lastError      string
+	logs           []RequestLogMsg
+	width          int
+	height         int
+	paused         bool
+	showErrorsOnly bool
+	filter         string
+	filtering      bool
+	filterInput    textinput.Model
+	stats          SessionStats
+	quitting       bool
+	exportPrompt   bool
+	exportAnswer   string
 }
 
 type StateMsg struct {
@@ -136,13 +136,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c", "C":
 			m.logs = nil
 		case "e", "E":
-			m.errorsOnly = !m.errorsOnly
+			m.showErrorsOnly = !m.showErrorsOnly
 		case "/":
 			m.filtering = true
 			m.filterInput.Focus()
 		}
 	}
 	return m, nil
+}
+
+func (m Model) shouldShowEntry(entry RequestLogMsg) bool {
+	if m.filter != "" && !strings.Contains(entry.Path, m.filter) {
+		return false
+	}
+	if m.showErrorsOnly && entry.Status < 400 {
+		return false
+	}
+	return true
 }
 
 func statusColor(status int) lipgloss.Color {
@@ -207,8 +217,8 @@ func (m Model) View() string {
 	if m.paused {
 		statusLine += " | paused"
 	}
-	if m.errorsOnly {
-		statusLine += " | errors"
+	if m.showErrorsOnly {
+		statusLine += " | errors only"
 	}
 	statusLine += fmt.Sprintf(" | req %d err %d bytes %d/%d avg %.1fms", m.stats.requests, m.stats.errors, m.stats.bytesIn, m.stats.bytesOut, m.stats.avgLatency())
 	b.WriteString(status.Render(statusLine))
@@ -246,10 +256,7 @@ func (m Model) View() string {
 	count := 0
 	for i := len(m.logs) - 1; i >= 0 && count < availableLines; i-- {
 		entry := m.logs[i]
-		if m.errorsOnly && entry.Status < 400 {
-			continue
-		}
-		if m.filter != "" && !strings.Contains(entry.Path, m.filter) {
+		if !m.shouldShowEntry(entry) {
 			continue
 		}
 
