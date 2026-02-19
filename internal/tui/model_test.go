@@ -31,12 +31,12 @@ func TestModelLogsFilters(t *testing.T) {
 		updated, _ := m.Update(msg)
 		m = updated.(Model)
 	}
-	m.errorsOnly = true
+	m.showErrorsOnly = true
 	view := m.View()
 	if !strings.Contains(view, "errors") {
 		t.Fatalf("view missing errors indicator: %s", view)
 	}
-	m.errorsOnly = false
+	m.showErrorsOnly = false
 	m.filter = "bar"
 	view = m.View()
 	if strings.Contains(view, "/foo") {

@@ -2,24 +2,26 @@
 
 **Project:** Remo  
 **Current Phase:** 02
-**Current Plan:** 04 Complete
-**Last Action:** Completed 02-tui-request-logging-04-PLAN.md - TUI keyboard controls for quit, error filtering, and pause
+**Current Plan:** 05 Complete
+**Last Action:** Completed 02-tui-request-logging-05-PLAN.md - Session statistics tracking and log export
 **Updated:** 2026-02-19
 
 ---
 
 ## Current Position
 
-Plan 04 complete: TUI now has keyboard controls for quit with export prompt, error filtering, and pause/resume.
+Plan 05 complete: TUI now displays real-time session statistics and supports JSON log export.
 
-- 'q' key triggers graceful shutdown with "Export session log to file? (y/n)" prompt
-- 'e' key toggles errors-only filter showing only 4xx/5xx responses with "errors only" indicator
-- 'p' key pauses/resumes event polling with red "[PAUSED]" indicator
-- QuitMsg type enables client coordination for graceful shutdown
-- shouldShowEntry() helper unifies text filter and error filter logic
-- Requirements TUI-04 and TUI-05 addressed
+- Statistics header shows "req {N} err {N} bytes {in}/{out} avg {N}ms" in gray color
+- RequestCount, ErrorCount, BytesIn, BytesOut, TotalLatency tracked in SessionStats
+- Error count increments for HTTP status >= 400
+- 'c' key clears both logs and statistics (resets to zero)
+- Log export to JSON with filename format: remo-log-{subdomain}-{timestamp}.json
+- Export triggered when user answers 'y' to quit prompt
+- Client stores up to 100 logs locally for export
+- Requirements TUI-05 addressed
 
-**Next:** Phase 02, Plan 05 — Session statistics tracking and display
+**Next:** Phase 02 complete - all plans finished
 
 ---
 
@@ -29,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 
 **Core value:** Users can expose local services through public subdomains using only system SSH, with minimal client complexity
 
-**Current focus:** Phase 2 — TUI Request Logging (Plan 02 complete, 3 plans remaining)
+**Current focus:** Phase 2 — TUI Request Logging (5/5 plans complete)
 
 ---
 
@@ -38,7 +40,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 | Phase | Status | Requirements | Plans |
 |-------|--------|--------------|-------|
 | 1 | ✓ Complete | 6 | 1/1 |
-| 2 | ○ In Progress | 7 | 4/5 |
+| 2 | ✓ Complete | 7 | 5/5 |
 | 3 | ○ Not started | 3 | 0/1 |
 
 ---
@@ -57,6 +59,9 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 10. **Export prompt state machine** — exportPrompt flag intercepts all key input until resolved
 11. **Error filter predicate** — shouldShowEntry() combines text filter and error-only filter
 12. **PAUSED indicator styling** — Red bold text for high visibility in status bar
+13. **Statistics format** — "req {N} err {N} bytes {in}/{out} avg {N}ms" for compact display
+14. **Gray statistics color** — lipgloss.Color("241") for subtle, non-intrusive stats line
+15. **Log export storage** — Client maintains circular buffer of 100 most recent requests
 
 ---
 
@@ -65,13 +70,14 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 1. ✓ SSH tunnel hangs — **FIXED** by using external ssh command (Plan 01)
 2. ✓ TUI quit key missing — **FIXED** 'q' key now quits the TUI with export prompt (Plan 04)
 3. ✓ Request logs not showing — **FIXED** — Client polls and forwards events, TUI displays with filtering (Plan 04)
+4. ✓ Session statistics missing — **FIXED** — Real-time statistics tracking with req/err/bytes/latency (Plan 05)
 
 ---
 
 ## Session Continuity
 
 **Started:** 2026-02-18
-**Last Session:** 2026-02-19T03:48:00Z
-**Context:** Completed 02-tui-request-logging-04-PLAN.md. TUI now has keyboard controls for quit with export, error filtering, and pause/resume functionality.
+**Last Session:** 2026-02-19T03:49:00Z
+**Context:** Completed 02-tui-request-logging-05-PLAN.md. TUI displays real-time session statistics and client exports logs to JSON on quit.
 
 ---

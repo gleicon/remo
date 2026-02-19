@@ -48,7 +48,7 @@ Plans:
 - [x] 02-tui-request-logging-02-PLAN.md — Client event polling and TUI forwarding (complete 2026-02-19)
 - [x] 02-tui-request-logging-03-PLAN.md — TUI visual enhancements: colors, path wrapping, help footer (complete 2026-02-19)
 - [x] 02-tui-request-logging-04-PLAN.md — Keyboard controls: quit with export, error filter, pause (complete 2026-02-19)
-- [ ] 02-tui-request-logging-05-PLAN.md — Session statistics tracking and JSON log export
+- [x] 02-tui-request-logging-05-PLAN.md — Session statistics tracking and JSON log export (complete 2026-02-19)
 
 **Goal:** Working TUI dashboard showing live request log
 
