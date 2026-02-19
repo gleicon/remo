@@ -254,6 +254,9 @@ func (c *Client) runSession(ctx context.Context) error {
 		return fmt.Errorf("register with server: %w", err)
 	}
 
+	// Start polling for request events
+	c.startEventPolling(ctx)
+
 	if c.cfg.URL != "" {
 		c.log.Info().Str("url", c.cfg.URL).Str("subdomain", c.cfg.Subdomain).Int("port", remotePort).Msg("connected to server - tunnel ready")
 	} else {
