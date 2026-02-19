@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/gleicon/remo/internal/client"
@@ -20,6 +21,7 @@ type connectOptions struct {
 	identity   string
 	tui        bool
 	remotePort int
+	debug      bool
 }
 
 func newConnectCommand(r *rootCommand) *cobra.Command {
@@ -37,12 +39,18 @@ func newConnectCommand(r *rootCommand) *cobra.Command {
 	cmd.Flags().StringVar(&opts.identity, "identity", identity.DefaultPath(), "path to identity file")
 	cmd.Flags().BoolVar(&opts.tui, "tui", false, "enable terminal UI")
 	cmd.Flags().IntVar(&opts.remotePort, "port", 0, "remote port to use (auto-assigned if not specified)")
+	cmd.Flags().BoolVarP(&opts.debug, "debug", "v", false, "enable debug logging")
 	return cmd
 }
 
 func runConnect(r *rootCommand, opts *connectOptions) error {
 	if opts.server == "" {
-		return fmt.Errorf("server is required (e.g., user@yourserver.com or yourserver.com:22)")
+		return fmt.Errorf("server is required (e.g., user@yourserver.com or yourserver.com)")
+	}
+
+	logger := r.Logger()
+	if opts.debug {
+		logger = logger.Level(zerolog.DebugLevel)
 	}
 
 	id, err := identity.Load(opts.identity)
@@ -60,7 +68,7 @@ func runConnect(r *rootCommand, opts *connectOptions) error {
 		ServerPort:  serverPort,
 		Subdomain:   opts.subdomain,
 		UpstreamURL: opts.upstream,
-		Logger:      r.Logger(),
+		Logger:      logger,
 		Identity:    id,
 		EnableTUI:   opts.tui,
 		RemotePort:  opts.remotePort,
