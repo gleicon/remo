@@ -2,24 +2,24 @@
 
 **Project:** Remo  
 **Current Phase:** 02
-**Current Plan:** 03 Complete
-**Last Action:** Completed 02-tui-request-logging-03-PLAN.md - TUI visual enhancements with color-coded status codes
+**Current Plan:** 04 Complete
+**Last Action:** Completed 02-tui-request-logging-04-PLAN.md - TUI keyboard controls for quit, error filtering, and pause
 **Updated:** 2026-02-19
 
 ---
 
 ## Current Position
 
-Plan 03 complete: TUI now has visual enhancements with color-coded status codes, path wrapping, and dynamic height.
+Plan 04 complete: TUI now has keyboard controls for quit with export prompt, error filtering, and pause/resume.
 
-- Status codes color-coded (2xx green, 3xx blue, 4xx yellow, 5xx red)
-- Long paths wrap to multiple lines instead of truncating
-- Help footer shows all key bindings: q:quit c:clear e:errors p:pause /:filter
-- Log display uses available terminal height dynamically
-- TUI quit key now functional ('q' to quit)
-- Requirements TUI-03 addressed
+- 'q' key triggers graceful shutdown with "Export session log to file? (y/n)" prompt
+- 'e' key toggles errors-only filter showing only 4xx/5xx responses with "errors only" indicator
+- 'p' key pauses/resumes event polling with red "[PAUSED]" indicator
+- QuitMsg type enables client coordination for graceful shutdown
+- shouldShowEntry() helper unifies text filter and error filter logic
+- Requirements TUI-04 and TUI-05 addressed
 
-**Next:** Phase 02, Plan 04 — Error display and filtering improvements
+**Next:** Phase 02, Plan 05 — Session statistics tracking and display
 
 ---
 
@@ -38,7 +38,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 | Phase | Status | Requirements | Plans |
 |-------|--------|--------------|-------|
 | 1 | ✓ Complete | 6 | 1/1 |
-| 2 | ○ In Progress | 7 | 3/5 |
+| 2 | ○ In Progress | 7 | 4/5 |
 | 3 | ○ Not started | 3 | 0/1 |
 
 ---
@@ -54,21 +54,24 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 7. **Status code color scheme** — Green 2xx, Blue 3xx, Yellow 4xx, Red 5xx per HTTP conventions
 8. **Path wrapping** — Multi-line display for paths >40 chars instead of truncation
 9. **Terminal height adaptation** — Reserve 3 header + 1 footer lines, use remaining space for logs
+10. **Export prompt state machine** — exportPrompt flag intercepts all key input until resolved
+11. **Error filter predicate** — shouldShowEntry() combines text filter and error-only filter
+12. **PAUSED indicator styling** — Red bold text for high visibility in status bar
 
 ---
 
 ## Open Issues
 
 1. ✓ SSH tunnel hangs — **FIXED** by using external ssh command (Plan 01)
-2. ✓ TUI quit key missing — **FIXED** 'q' key now quits the TUI (Plan 03)
-3. ⚡ Request logs not showing — **IN PROGRESS** — Client now polls and forwards, TUI display pending
+2. ✓ TUI quit key missing — **FIXED** 'q' key now quits the TUI with export prompt (Plan 04)
+3. ✓ Request logs not showing — **FIXED** — Client polls and forwards events, TUI displays with filtering (Plan 04)
 
 ---
 
 ## Session Continuity
 
 **Started:** 2026-02-18
-**Last Session:** 2026-02-19T02:34:00Z
-**Context:** Completed 02-tui-request-logging-03-PLAN.md. TUI now has color-coded status codes, path wrapping, help footer, and dynamic height.
+**Last Session:** 2026-02-19T03:48:00Z
+**Context:** Completed 02-tui-request-logging-04-PLAN.md. TUI now has keyboard controls for quit with export, error filtering, and pause/resume functionality.
 
 ---

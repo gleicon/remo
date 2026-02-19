@@ -16,11 +16,11 @@
 
 ### TUI (Request Log Dashboard)
 
-- [ ] **TUI-01**: TUI displays connection status and assigned URL
-- [ ] **TUI-02**: TUI shows scrolling request log (method, path, status, latency)
-- [ ] **TUI-03**: Pressing 'q' quits gracefully
-- [ ] **TUI-04**: Pressing 'c' clears log
-- [ ] **TUI-05**: TUI updates in real-time as requests flow
+- [x] **TUI-01**: TUI displays connection status and assigned URL
+- [x] **TUI-02**: TUI shows scrolling request log (method, path, status, latency)
+- [x] **TUI-03**: Pressing 'q' quits gracefully with export prompt
+- [x] **TUI-04**: Pressing 'c' clears log
+- [x] **TUI-05**: TUI updates in real-time as requests flow with pause/resume and error filtering
 
 ### Server (Proxy + Registry)
 
@@ -85,14 +85,14 @@
 | CLI-04 | Phase 1 | ✓ Complete (01-01) |
 | CLI-05 | Phase 1 | ✓ Complete (01-01) |
 | CLI-06 | Phase 1 | ✓ Complete (01-01) |
-| TUI-01 | Phase 2 | Pending |
-| TUI-02 | Phase 2 | Pending |
-| TUI-03 | Phase 2 | Pending |
-| TUI-04 | Phase 2 | Pending |
-| TUI-05 | Phase 2 | Pending |
+| TUI-01 | Phase 2 | ✓ Complete (02-03) |
+| TUI-02 | Phase 2 | ✓ Complete (02-03) |
+| TUI-03 | Phase 2 | ✓ Complete (02-04) |
+| TUI-04 | Phase 2 | ✓ Complete (02-04) |
+| TUI-05 | Phase 2 | ✓ Complete (02-04) |
 | SRV-01 | Phase 1 | ✓ Exists |
 | SRV-02 | Phase 1 | ✓ Exists |
-| SRV-03 | Phase 2 | Complete |
+| SRV-03 | Phase 2 | ✓ Complete (02-01) |
 | SRV-04 | Phase 1 | ✓ Exists |
 | SRV-05 | Phase 1 | ✓ Exists |
 | NGX-01 | Phase 3 | ✓ Exists |
@@ -112,4 +112,4 @@
 
 ---
 *Requirements defined: 2026-02-18*
-*Last updated: 2026-02-18 after spec review*
+*Last updated: 2026-02-19 after Plan 04 completion*

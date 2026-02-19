@@ -47,7 +47,7 @@ Plans:
 - [x] 02-tui-request-logging-01-PLAN.md — Server request event capture and /events endpoint (complete 2026-02-19)
 - [x] 02-tui-request-logging-02-PLAN.md — Client event polling and TUI forwarding (complete 2026-02-19)
 - [x] 02-tui-request-logging-03-PLAN.md — TUI visual enhancements: colors, path wrapping, help footer (complete 2026-02-19)
-- [ ] 02-tui-request-logging-04-PLAN.md — Keyboard controls: quit with export, error filter, pause
+- [x] 02-tui-request-logging-04-PLAN.md — Keyboard controls: quit with export, error filter, pause (complete 2026-02-19)
 - [ ] 02-tui-request-logging-05-PLAN.md — Session statistics tracking and JSON log export
 
 **Goal:** Working TUI dashboard showing live request log
@@ -119,6 +119,7 @@ Plans:
 - [x] Phase 2 Plan 01 complete (2026-02-19) — Server request event capture
 - [x] Phase 2 Plan 02 complete (2026-02-19) — Client event polling
 - [x] Phase 2 Plan 03 complete (2026-02-19) — TUI visual enhancements
+- [x] Phase 2 Plan 04 complete (2026-02-19) — Keyboard controls for quit, filter, pause
 - [ ] Phase 2 complete
 - [ ] Phase 3 complete
 
@@ -139,4 +140,4 @@ Plans:
 - Fallback behavior if ssh not found
 
 ---
-*Last updated: 2026-02-19*
+*Last updated: 2026-02-19 after Plan 04 completion*
