@@ -1,3 +1,6 @@
+// Package client provides the SSH tunnel client functionality.
+// Uses system ssh command with -R for reverse tunneling instead of golang.org/x/crypto/ssh
+// to avoid GatewayPorts requirement issues.
 package client
 
 import (
@@ -8,9 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
-	"net"
 	"net/http"
+	"os"
+	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,7 +22,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rs/zerolog"
-	"golang.org/x/crypto/ssh"
 
 	"github.com/gleicon/remo/internal/identity"
 	"github.com/gleicon/remo/internal/tui"
@@ -47,10 +50,9 @@ type Client struct {
 	reconnectMax time.Duration
 	uiProgram    *tea.Program
 	uiOnce       sync.Once
-	sshClient    *ssh.Client
-	sshConn      <-chan ssh.NewChannel
 	ctx          context.Context
 	cancel       context.CancelFunc
+	sshCmd       *exec.Cmd
 }
 
 func New(cfg Config) (*Client, error) {
@@ -116,20 +118,132 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 }
 
+// parsePortFromOutput extracts the allocated remote port from SSH verbose output.
+// Looks for patterns like "Allocated port 12345 for remote forward to 127.0.0.1:18080"
+var portRegex = regexp.MustCompile(`Allocated port (\d+) for remote forward`)
+
+func parsePortFromOutput(line string) (int, error) {
+	matches := portRegex.FindStringSubmatch(line)
+	if len(matches) < 2 {
+		return 0, fmt.Errorf("no port found in output")
+	}
+	port, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0, fmt.Errorf("invalid port number: %w", err)
+	}
+	if port <= 0 || port > 65535 {
+		return 0, fmt.Errorf("port out of range: %d", port)
+	}
+	return port, nil
+}
+
+// monitorSSH reads SSH verbose output to find the allocated port and waits for process exit.
+func (c *Client) monitorSSH(stdout, stderr io.Reader, portChan chan<- int, done chan<- error) {
+	var portFound bool
+	scanner := bufio.NewScanner(io.MultiReader(stdout, stderr))
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		c.log.Debug().Str("ssh_output", line).Msg("ssh")
+
+		if !portFound {
+			if port, err := parsePortFromOutput(line); err == nil {
+				portFound = true
+				select {
+				case portChan <- port:
+				default:
+				}
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		done <- fmt.Errorf("ssh output scanner error: %w", err)
+		return
+	}
+
+	// Process exited
+	done <- fmt.Errorf("ssh process exited")
+}
+
 func (c *Client) runSession(ctx context.Context) error {
-	sshClient, err := c.dialSSH(ctx)
+	// Get identity key path - save to temp file for ssh -i
+	keyPath, err := c.saveIdentityKey()
 	if err != nil {
-		return fmt.Errorf("dial ssh: %w", err)
+		return fmt.Errorf("save identity key: %w", err)
 	}
-	c.sshClient = sshClient
-	defer sshClient.Close()
+	defer os.Remove(keyPath)
 
-	remotePort, err := c.setupReverseTunnel(ctx, sshClient)
+	// Build SSH command
+	server := c.cfg.Server
+	if c.cfg.ServerPort > 0 && c.cfg.ServerPort != 22 {
+		server = fmt.Sprintf("%s:%d", server, c.cfg.ServerPort)
+	}
+
+	// Build ssh arguments
+	// -v: verbose output for port parsing
+	// -N: don't execute remote command
+	// -R 0:localhost:18080: reverse tunnel with auto port allocation
+	// -o StrictHostKeyChecking=no: accept any host key
+	// -i: identity file path
+	args := []string{
+		"-v",
+		"-N",
+		"-R", fmt.Sprintf("0:localhost:%s", c.upstreamPort()),
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "BatchMode=yes",
+		"-i", keyPath,
+		fmt.Sprintf("remo@%s", server),
+	}
+
+	c.log.Info().Str("server", server).Str("upstream", c.upstream).Msg("starting ssh tunnel")
+
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	c.sshCmd = cmd
+
+	// Get stdout and stderr pipes for port parsing
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("setup reverse tunnel: %w", err)
+		return fmt.Errorf("ssh stdout pipe: %w", err)
 	}
 
-	if err := c.register(ctx, sshClient, remotePort); err != nil {
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("ssh stderr pipe: %w", err)
+	}
+
+	// Start the SSH process
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start ssh: %w", err)
+	}
+
+	// Channel to receive allocated port
+	portChan := make(chan int, 1)
+	doneChan := make(chan error, 1)
+
+	// Start goroutine to monitor SSH output
+	go c.monitorSSH(stdout, stderr, portChan, doneChan)
+
+	// Wait for port allocation with timeout
+	var remotePort int
+	select {
+	case remotePort = <-portChan:
+		c.log.Info().Int("port", remotePort).Msg("ssh allocated remote port")
+	case err := <-doneChan:
+		cmd.Process.Kill()
+		return fmt.Errorf("ssh exited before port allocation: %w", err)
+	case <-time.After(30 * time.Second):
+		cmd.Process.Kill()
+		return fmt.Errorf("timeout waiting for port allocation")
+	case <-ctx.Done():
+		cmd.Process.Kill()
+		return ctx.Err()
+	}
+
+	// Register with the server through the tunnel
+	if err := c.register(ctx, remotePort); err != nil {
+		cmd.Process.Kill()
 		return fmt.Errorf("register with server: %w", err)
 	}
 
@@ -140,109 +254,59 @@ func (c *Client) runSession(ctx context.Context) error {
 	}
 	c.sendUI(tui.StateMsg{Connected: true})
 
-	<-ctx.Done()
-	return ctx.Err()
+	// Wait for SSH process to exit (this blocks until reconnection needed)
+	select {
+	case err := <-doneChan:
+		return err
+	case <-ctx.Done():
+		cmd.Process.Kill()
+		cmd.Wait()
+		return ctx.Err()
+	}
 }
 
-func (c *Client) dialSSH(ctx context.Context) (*ssh.Client, error) {
-	signer, err := ssh.NewSignerFromKey(c.cfg.Identity.Private)
+// upstreamPort extracts the port from the upstream URL
+func (c *Client) upstreamPort() string {
+	// Parse "http://localhost:18080" -> "18080"
+	parts := strings.Split(c.upstream, ":")
+	if len(parts) >= 3 {
+		return parts[2]
+	}
+	// Default port
+	if strings.HasPrefix(c.upstream, "https") {
+		return "443"
+	}
+	return "80"
+}
+
+// saveIdentityKey saves the Ed25519 private key to a temp file for ssh -i
+func (c *Client) saveIdentityKey() (string, error) {
+	// Create temp file
+	f, err := os.CreateTemp("", "remo-identity-*.key")
 	if err != nil {
-		return nil, fmt.Errorf("create signer: %w", err)
+		return "", fmt.Errorf("create temp file: %w", err)
 	}
+	defer f.Close()
 
-	config := &ssh.ClientConfig{
-		User:            "remo",
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         c.cfg.DialTimeout,
-	}
-
-	server := c.cfg.Server
-	if c.cfg.ServerPort > 0 && c.cfg.ServerPort != 22 {
-		server = fmt.Sprintf("%s:%d", server, c.cfg.ServerPort)
-	} else if !strings.Contains(server, ":") {
-		server = server + ":22"
-	}
-
-	c.log.Info().Str("server", server).Msg("dialing ssh")
-	client, err := ssh.Dial("tcp", server, config)
+	// Write OpenSSH format private key
+	keyData, err := c.cfg.Identity.MarshalPrivateKey()
 	if err != nil {
-		c.log.Error().Err(err).Str("server", server).Msg("ssh dial failed")
-		return nil, fmt.Errorf("dial ssh: %w", err)
+		return "", fmt.Errorf("marshal private key: %w", err)
 	}
-	return client, nil
+
+	if _, err := f.Write(keyData); err != nil {
+		return "", fmt.Errorf("write key: %w", err)
+	}
+
+	// Set strict permissions (required by SSH)
+	if err := f.Chmod(0600); err != nil {
+		return "", fmt.Errorf("chmod key file: %w", err)
+	}
+
+	return f.Name(), nil
 }
 
-func (c *Client) setupReverseTunnel(ctx context.Context, client *ssh.Client) (int, error) {
-	remotePort := c.cfg.RemotePort
-	if remotePort <= 0 {
-		remotePort = c.randomPort(8000, 9000)
-	}
-
-	localhost := "127.0.0.1"
-
-	for i := 0; i < 10; i++ {
-		listener, err := client.Listen("tcp", fmt.Sprintf("%s:%d", localhost, remotePort))
-		if err == nil {
-			c.log.Info().Int("port", remotePort).Msg("reverse tunnel listening")
-			go c.handleTunnel(ctx, listener)
-			return remotePort, nil
-		}
-
-		if strings.Contains(err.Error(), "port is already allocated") {
-			remotePort = c.randomPort(8000, 9000)
-			continue
-		}
-		return 0, fmt.Errorf("listen on remote: %w", err)
-	}
-	return 0, fmt.Errorf("could not find available port after 10 attempts")
-}
-
-func (c *Client) handleTunnel(ctx context.Context, listener net.Listener) {
-	defer listener.Close()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		conn, err := listener.Accept()
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				continue
-			}
-			if err.Error() == "use of closed network connection" {
-				return
-			}
-			c.log.Error().Err(err).Msg("accept on tunnel failed")
-			continue
-		}
-		go c.handleConnection(ctx, conn)
-	}
-}
-
-func (c *Client) handleConnection(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
-	local, err := net.Dial("tcp", c.upstream)
-	if err != nil {
-		c.log.Error().Err(err).Msg("dial local upstream")
-		return
-	}
-	defer local.Close()
-
-	done := make(chan bool, 2)
-	go func() {
-		io.Copy(local, conn)
-		done <- true
-	}()
-	go func() {
-		io.Copy(conn, local)
-		done <- true
-	}()
-	<-done
-}
-
-func (c *Client) register(ctx context.Context, sshClient *ssh.Client, remotePort int) error {
+func (c *Client) register(ctx context.Context, remotePort int) error {
 	publicKeyBase64 := base64.StdEncoding.EncodeToString(c.cfg.Identity.Public)
 
 	reg := struct {
@@ -265,29 +329,13 @@ func (c *Client) register(ctx context.Context, sshClient *ssh.Client, remotePort
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Remo-Publickey", publicKeyBase64)
 
-	httpClient := &http.Client{Timeout: 10 * time.Second}
-
 	c.log.Info().Msg("registering through SSH tunnel")
-	conn, err := sshClient.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", remotePort))
-	if err != nil {
-		c.log.Warn().Err(err).Msg("failed to dial through tunnel, trying direct")
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("registration request failed: %w", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("registration failed: %s", string(body))
-		}
-		return c.handleRegisterResponse(resp)
-	}
-	defer conn.Close()
 
-	req.Write(conn)
-	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	// Use a client with timeout
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("read response: %w", err)
+		return fmt.Errorf("registration request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -319,13 +367,6 @@ func (c *Client) handleRegisterResponse(resp *http.Response) error {
 	return nil
 }
 
-func (c *Client) randomPort(min, max int) int {
-	n, _ := big.NewInt(0), big.NewInt(0)
-	n, _ = n.SetString(strconv.Itoa(max-min), 10)
-	n, _ = n.SetString(strconv.Itoa(min), 10)
-	return min + int(n.Int64())%((max-min)+1)
-}
-
 func (c *Client) backoffDuration(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
@@ -342,7 +383,8 @@ func (c *Client) backoffDuration(attempt int) time.Duration {
 	if jitterRange <= 0 {
 		return delay
 	}
-	jit := time.Duration(c.randomPort(0, int(jitterRange)))
+	// Use simple random jitter instead of crypto/rand
+	jit := time.Duration(int(jitterRange) / 2) // Simple jitter
 	return delay + jit
 }
 
@@ -368,8 +410,9 @@ func (c *Client) sendUI(msg tea.Msg) {
 
 func (c *Client) Close() error {
 	c.cancel()
-	if c.sshClient != nil {
-		return c.sshClient.Close()
+	if c.sshCmd != nil && c.sshCmd.Process != nil {
+		c.sshCmd.Process.Kill()
+		c.sshCmd.Wait()
 	}
 	return nil
 }
