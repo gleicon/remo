@@ -1,7 +1,9 @@
 package identity
 
 import (
+	"bytes"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -108,5 +110,61 @@ func TestDefaultPath(t *testing.T) {
 	path := DefaultPath()
 	if path == "" {
 		t.Fatal("default path should not be empty")
+	}
+}
+
+func TestMarshalPrivateKey(t *testing.T) {
+	id, err := Generate()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	keyData, err := id.MarshalPrivateKey()
+	if err != nil {
+		t.Fatalf("marshal private key: %v", err)
+	}
+
+	// Check PEM format
+	if !bytes.Contains(keyData, []byte("-----BEGIN OPENSSH PRIVATE KEY-----")) {
+		t.Fatal("missing OPENSSH PRIVATE KEY header")
+	}
+	if !bytes.Contains(keyData, []byte("-----END OPENSSH PRIVATE KEY-----")) {
+		t.Fatal("missing OPENSSH PRIVATE KEY footer")
+	}
+
+	// Verify key data is base64 encoded between headers
+	lines := bytes.Split(keyData, []byte("\n"))
+	var base64Lines []byte
+	inKey := false
+	for _, line := range lines {
+		if bytes.Contains(line, []byte("-----BEGIN")) {
+			inKey = true
+			continue
+		}
+		if bytes.Contains(line, []byte("-----END")) {
+			break
+		}
+		if inKey && len(line) > 0 {
+			base64Lines = append(base64Lines, line...)
+		}
+	}
+
+	// Should be able to decode the base64
+	decoded, err := base64.StdEncoding.DecodeString(string(base64Lines))
+	if err != nil {
+		t.Fatalf("base64 decode failed: %v", err)
+	}
+
+	// Should start with magic header
+	if !bytes.HasPrefix(decoded, []byte("openssh-key-v1\x00")) {
+		t.Fatal("missing openssh-key-v1 magic header")
+	}
+}
+
+func TestMarshalPrivateKeyNil(t *testing.T) {
+	var id *Identity
+	_, err := id.MarshalPrivateKey()
+	if err == nil {
+		t.Fatal("expected error for nil identity")
 	}
 }

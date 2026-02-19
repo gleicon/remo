@@ -167,3 +167,138 @@ func TestSendUINoOp(t *testing.T) {
 	}
 	c.sendUI(nil)
 }
+
+func TestParsePortFromOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantPort int
+		wantErr  bool
+	}{
+		{
+			name:     "OpenSSH 8.x format with debug prefix",
+			input:    "debug1: Allocated port 12345 for remote forward to 127.0.0.1:18080",
+			wantPort: 12345,
+			wantErr:  false,
+		},
+		{
+			name:     "Simple format without prefix",
+			input:    "Allocated port 8080 for remote forward",
+			wantPort: 8080,
+			wantErr:  false,
+		},
+		{
+			name:     "OpenSSH 9.x format with different host",
+			input:    "debug1: Allocated port 9999 for remote forward to localhost:3000",
+			wantPort: 9999,
+			wantErr:  false,
+		},
+		{
+			name:     "High port number",
+			input:    "Allocated port 65000 for remote forward",
+			wantPort: 65000,
+			wantErr:  false,
+		},
+		{
+			name:     "Minimum valid port",
+			input:    "Allocated port 1 for remote forward",
+			wantPort: 1,
+			wantErr:  false,
+		},
+		{
+			name:    "No port in output",
+			input:   "some other debug output",
+			wantErr: true,
+		},
+		{
+			name:    "Invalid port format",
+			input:   "Allocated port abc for remote forward",
+			wantErr: true,
+		},
+		{
+			name:    "Port zero is invalid",
+			input:   "Allocated port 0 for remote forward",
+			wantErr: true,
+		},
+		{
+			name:    "Port too high",
+			input:   "Allocated port 70000 for remote forward",
+			wantErr: true,
+		},
+		{
+			name:    "Negative port",
+			input:   "Allocated port -1 for remote forward",
+			wantErr: true,
+		},
+		{
+			name:    "Empty string",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:     "Port embedded in longer line",
+			input:    "some prefix Allocated port 54321 for remote forward to host:80 and suffix",
+			wantPort: 54321,
+			wantErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPort, err := parsePortFromOutput(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parsePortFromOutput() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotPort != tt.wantPort {
+				t.Errorf("parsePortFromOutput() = %v, want %v", gotPort, tt.wantPort)
+			}
+		})
+	}
+}
+
+func TestUpstreamPort(t *testing.T) {
+	tests := []struct {
+		name     string
+		upstream string
+		want     string
+	}{
+		{
+			name:     "HTTP with port",
+			upstream: "http://localhost:18080",
+			want:     "18080",
+		},
+		{
+			name:     "HTTPS with port",
+			upstream: "https://localhost:443",
+			want:     "443",
+		},
+		{
+			name:     "HTTP without port",
+			upstream: "http://localhost",
+			want:     "80",
+		},
+		{
+			name:     "HTTPS without port",
+			upstream: "https://localhost",
+			want:     "443",
+		},
+		{
+			name:     "Different port",
+			upstream: "http://127.0.0.1:3000",
+			want:     "3000",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Client{
+				upstream: tt.upstream,
+			}
+			got := c.upstreamPort()
+			if got != tt.want {
+				t.Errorf("upstreamPort() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
