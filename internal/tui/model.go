@@ -99,6 +99,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		switch msg.String() {
+		case "q", "Q":
+			return m, tea.Quit
 		case "p", "P":
 			m.paused = !m.paused
 		case "c", "C":
@@ -144,6 +146,11 @@ func wrapPath(path string, maxWidth int) []string {
 	return lines
 }
 
+func (m Model) helpFooter() string {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	return style.Render("q:quit c:clear e:errors p:pause /:filter")
+}
+
 func (m Model) View() string {
 	var b strings.Builder
 	status := lipgloss.NewStyle().Bold(true)
@@ -181,10 +188,25 @@ func (m Model) View() string {
 	}
 	if len(m.logs) == 0 {
 		b.WriteString("  waiting for traffic...\n")
+		b.WriteString("\n")
+		b.WriteString(m.helpFooter())
 		return b.String()
 	}
+
+	// Calculate available lines for logs
+	headerLines := 3
+	footerLines := 1
+	filterLine := 0
+	if m.filter != "" {
+		filterLine = 1
+	}
+	availableLines := m.height - headerLines - footerLines - filterLine
+	if availableLines < 5 {
+		availableLines = 5 // Minimum
+	}
+
 	count := 0
-	for i := len(m.logs) - 1; i >= 0 && count < 10; i-- {
+	for i := len(m.logs) - 1; i >= 0 && count < availableLines; i-- {
 		entry := m.logs[i]
 		if m.errorsOnly && entry.Status < 400 {
 			continue
@@ -209,6 +231,8 @@ func (m Model) View() string {
 		}
 		count++
 	}
+	b.WriteString("\n")
+	b.WriteString(m.helpFooter())
 	return b.String()
 }
 
