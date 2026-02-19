@@ -1,86 +1,103 @@
-# Roadmap: Remo Refactoring
+# Roadmap: Remo MVP
 
-**Project:** Remo — Simplified reverse tunnel  
+**Project:** Remo — Self-hosted reverse tunnel  
 **Created:** 2026-02-18  
 **Phases:** 3  
-**Requirements:** 13 v1 requirements
+**Requirements:** 22 v1 (7 already working, 15 to implement)
 
 ---
 
-## Phase 1: Client Simplification
+## Phase 1: SSH Client Rewrite
 
-**Goal:** Replace internal SSH dialer with external ssh command
+**Goal:** Replace internal SSH dialer with external `ssh -R` command
 
-**Requirements:** CLI-01, CLI-02, CLI-03, CLI-04, CLI-05
+**Requirements:** CLI-01, CLI-02, CLI-03, CLI-04, CLI-05, CLI-06
 
 **Success Criteria:**
-1. Client successfully creates tunnel using system ssh command
-2. No hangs or connection issues
-3. Tunnel registration works through ssh -R forwarded port
-4. Old SSH dial code removed
-5. Tests updated and passing
+1. `remo connect` launches `ssh -R 0:localhost:18080` successfully
+2. Client parses SSH's allocated port from verbose output
+3. Client registers subdomain through the tunnel
+4. Old `ssh.Dial` code removed from `internal/client/client.go`
+5. No hangs, reliable reconnection
 
 **Approach:**
-- Rewrite `internal/client/client.go` to exec ssh command
-- Use `-R` flag format: `-R 0:localhost:SERVER_PORT` (auto-assign remote port)
-- Parse ssh output to detect assigned port
-- Register with server through the tunnel
+- Rewrite client to use `exec.Command("ssh", ...)`
+- Use `-v` flag to capture port assignment
+- Parse output for "Allocated port" message
+- Register with server via HTTP over tunnel
+- Keep identity/Ed25519 for auth header
+
+**Files to modify:**
+- `internal/client/client.go` — Replace dialSSH, setupReverseTunnel
+- `cmd/remo/root/connect.go` — May need flag adjustments
 
 ---
 
-## Phase 2: TUI & Proxy Integration
+## Phase 2: TUI & Request Logging
 
-**Goal:** Fix TUI issues and add request logging
+**Goal:** Working TUI dashboard showing live request log
 
-**Requirements:** TUI-01, TUI-02, TUI-03, TUI-04, PROXY-01, PROXY-02, PROXY-03
+**Requirements:** TUI-01, TUI-02, TUI-03, TUI-04, TUI-05, SRV-03
 
 **Success Criteria:**
-1. Pressing 'q' quits the TUI gracefully
-2. HTTP requests appear in TUI in real-time
-3. TUI shows method, path, status code, latency
-4. Client shuts down cleanly without hanging
+1. TUI shows connection status and URL
+2. HTTP requests appear in real-time
+3. Each log line: method, path, status, latency
+4. 'q' quits gracefully
+5. 'c' clears the log
 
 **Approach:**
-- Add 'q' key handler to TUI model
-- Create event system between server proxy and client
-- Proxy emits request events after each handled request
+- Add request event channel system
+- Server proxy emits events after each request
 - Client receives events and forwards to TUI
-- Clean up TUI goroutine on shutdown
+- TUI Update() handles RequestLogMsg
+- Add 'q' and 'c' key handlers
+
+**Files to modify:**
+- `internal/server/server.go` — Emit request events
+- `internal/tui/model.go` — Add key handlers, improve display
+- `internal/client/client.go` — Wire events to TUI
 
 ---
 
-## Phase 3: Documentation
+## Phase 3: Nginx & Documentation
 
-**Goal:** Document admin endpoints and usage
+**Goal:** Production-ready with nginx, full documentation
 
-**Requirements:** DOCS-01, DOCS-02, DOCS-03
+**Requirements:** NGX-02, NGX-03, DOC-01, DOC-02
 
 **Success Criteria:**
-1. README includes curl examples for /status, /metrics
-2. SSH setup requirements clearly documented
-3. Client usage examples show new simplified flow
+1. Working nginx config example for wildcard domains
+2. Let's Encrypt setup documented
+3. README has quick start
+4. Admin endpoints documented
 
 **Approach:**
-- Update README.md with admin endpoint examples
-- Add TROUBLESHOOTING.md for common issues
-- Update --help text with clearer descriptions
+- Create `docs/nginx-example.conf`
+- Update README with architecture diagram
+- Document admin endpoint authentication
+- SSH key setup guide
+
+**Files to create/modify:**
+- `README.md` — Full rewrite
+- `docs/nginx.md` — Nginx setup
+- `docs/ssh-setup.md` — Key management
 
 ---
 
 ## Requirements Mapping
 
-| Phase | Requirements | Count |
-|-------|--------------|-------|
-| 1 | CLI-01 to CLI-05 | 5 |
-| 2 | TUI-01 to TUI-04, PROXY-01 to PROXY-03 | 7 |
-| 3 | DOCS-01 to DOCS-03 | 3 |
-| **Total** | | **15** |
+| Phase | Requirements | New | Existing | Total |
+|-------|--------------|-----|----------|-------|
+| 1 | CLI-01 to CLI-06 | 6 | 0 | 6 |
+| 2 | TUI-01 to TUI-05, SRV-03 | 6 | 0 | 6 |
+| 3 | NGX-02, NGX-03, DOC-01, DOC-02 | 4 | 0 | 4 |
+| — | SRV-01, SRV-02, SRV-04, SRV-05, NGX-01, ADM-01-03 | 0 | 7 | 7 |
+| **Total** | | **16** | **7** | **23** |
 
 ---
 
 ## Progress Tracking
-
-Update this section after each phase:
 
 - [ ] Phase 1 complete
 - [ ] Phase 2 complete
@@ -90,11 +107,17 @@ Update this section after each phase:
 
 ## Notes
 
-**Critical path:** Phase 1 (client simplification) unblocks everything else. The SSH hang issue must be resolved first.
+**Critical path:** Phase 1 unblocks everything. The SSH hang is the primary blocker.
 
-**Risk:** External ssh command dependency — need to verify ssh is available and handle gracefully if not.
+**Testing strategy:**
+- Phase 1: Test with real VPS (ssh -R behavior varies)
+- Phase 2: Local testing with mock requests
+- Phase 3: Production nginx setup test
 
-**Testing:** Each phase needs manual testing with real VPS since integration testing SSH tunnels is difficult.
+**Risk mitigation:**
+- Keep old code in git history (don't delete, just replace)
+- Test ssh command availability on macOS/Linux/Windows
+- Fallback behavior if ssh not found
 
 ---
 *Last updated: 2026-02-18*

@@ -1,46 +1,44 @@
-# Remo — Code Review & Refactoring Project
+# Remo — Self-Hosted Reverse Tunnel
 
 ## What This Is
 
-**Remo** is a reverse tunnel service that exposes local services through public subdomains. Currently it's overly complex — it implements its own SSH client and tries to manage SSH connections directly, which causes the hanging issues you're experiencing.
+**Remo** is a self-hosted reverse tunnel service that exposes local development services through public subdomains (`*.yourdomain.tld`). 
 
-The goal is to simplify: use the system's `ssh` command for tunneling, and focus remo on being a lightweight registration client and HTTP proxy server.
+Unlike ngrok or similar services, remo:
+- Uses **your own VPS** and domain
+- Uses **system SSH** for tunneling (no custom protocols)
+- Can run **behind nginx** (reuse existing VPS setups)
+- Has a **TUI dashboard** showing real-time request logs (like `top`)
+
+Inspired by: SirTunnel, tunnelto, pyjam.as/tunnel
 
 ## Core Value
 
-Users can expose local services through public subdomains using only system SSH, with minimal client complexity and reliable server-side HTTP proxying.
+Developers can expose local services through public subdomains using only system SSH, with a live dashboard showing traffic — no complex setup, no paid services.
 
-## Current Problems
+## Architecture (MVP)
 
-### 1. SSH Connection Hangs (Critical)
-**Location:** `internal/client/client.go:203`
+```
+┌─────────────────┐         ┌──────────────────┐         ┌─────────────┐
+│   Local Dev     │◄──SSH──►│   Your VPS       │◄──HTTP──►│   Public    │
+│   Service       │  -R     │   (nginx+remo)   │         │   Internet  │
+│   localhost:3000│         │   *.domain.com   │         │             │
+└─────────────────┘         └──────────────────┘         └─────────────┘
+                                    │
+                                    ▼
+                            ┌───────────────┐
+                            │   TUI View    │
+                            │   Request Log │
+                            └───────────────┘
+```
 
-The client calls `client.Listen("tcp", ...)` which creates a reverse SSH tunnel. This requires:
-- sshd configured with `GatewayPorts yes` (rarely enabled by default)
-- Or `AllowTcpForwarding remote` 
-- The SSH user must be able to bind to the requested port
-
-**Result:** Connection succeeds but `setupReverseTunnel` hangs indefinitely.
-
-### 2. Wrong Architecture Approach
-The client implements its own SSH dialer (`ssh.Dial`). This is:
-- Complex (handling auth, host keys, reconnection)
-- Fragile (depends on sshd config)
-- Hard to debug
-
-**Should be:** Use the system's `ssh` command with `-R` flag for reverse tunnels.
-
-### 3. TUI Issues
-**Location:** `internal/tui/model.go`
-
-- No quit key ('q' missing from key handlers)
-- Request logs are received but **never sent** — the proxy code doesn't emit `RequestLogMsg`
-- No graceful shutdown coordination between TUI and client
-
-### 4. Admin Endpoints (Actually Complete)
-**Location:** `internal/server/server.go`
-
-The admin endpoints (`/status`, `/metrics`, `/healthz`) are implemented. They require `AdminSecret` config which may not be obvious.
+**Flow:**
+1. User runs `remo connect --server vps.domain.com --subdomain myapp`
+2. Client launches `ssh -R` to create reverse tunnel
+3. Client registers subdomain with remo server via tunnel
+4. Server adds route: `myapp.domain.com` → tunnel port
+5. Nginx proxies `*.domain.com` → remo server
+6. TUI shows real-time request log
 
 ## Validated (Existing Working Code)
 
@@ -49,44 +47,67 @@ The admin endpoints (`/status`, `/metrics`, `/healthz`) are implemented. They re
 - ✓ Ed25519 identity management — `internal/identity/identity.go`
 - ✓ SQLite persistence layer — `internal/store/store.go`
 - ✓ Authorization with public keys — `internal/auth/authorized.go`
-- ✓ Configuration loading — `cmd/remo/root/server.go`
+- ✓ Behind-proxy mode for nginx — `ModeProxy` in server config
 
 ## Active (To Fix/Build)
 
-- [ ] Simplify client to use external `ssh` command
-- [ ] Fix TUI quit key and request logging
-- [ ] Add request logging to proxy handler
-- [ ] Improve documentation for admin endpoints
-- [ ] Clean up dead code (internal SSH dialer)
+### Critical (Blocking Usage)
+- [ ] Replace internal SSH dialer with external `ssh -R` command
+- [ ] Fix TUI quit key ('q') and graceful shutdown
+- [ ] Wire up request logs from proxy to TUI
+
+### MVP Polish
+- [ ] Nginx configuration examples
+- [ ] Admin endpoint documentation
+- [ ] Setup script improvements
 
 ## Out of Scope
 
-- Built-in SSH server — Use system sshd
-- Complex TUI features — Keep it simple (logs + status)
-- Authentication beyond Ed25519 keys — Not needed for v1
+| Feature | Reason |
+|---------|--------|
+| Built-in SSH server | Use system sshd — simpler, more secure |
+| WireGuard support | SSH -R is sufficient for MVP |
+| Web UI | TUI is enough for developers |
+| OAuth/SSO | Ed25519 keys + authorized_keys is simpler |
+| Auto HTTPS | Let nginx/traefik handle TLS |
+| Multi-region | Single VPS deployment for MVP |
 
 ## Context
 
-**Current stack:** Go, Cobra, Bubble Tea, SQLite, golang.org/x/crypto/ssh
+**Design Philosophy (from research):**
+- SirTunnel: "Zero-configuration" — just SSH
+- pyjam.as/tunnel: "Bring your own server"
+- tunnelto.dev: "Expose local web servers"
 
-**Architecture:** Client-server with client managing its own SSH connections
+**Current Stack:** Go 1.25, Cobra, Bubble Tea, SQLite
 
-**Problem:** The SSH connection management is the source of hangs and complexity
+**Key Insight:** The internal SSH dialer (`golang.org/x/crypto/ssh`) is the source of hangs. System `ssh` command handles edge cases, reconnection, and host key management better.
 
 ## Constraints
 
-- **Tech:** Go 1.25, keep using Cobra for CLI, Bubble Tea for TUI
-- **SSH:** Must work with stock sshd (no special config required beyond normal key auth)
-- **Deployment:** Single binary, minimal dependencies
-- **Simplicity:** Less code is better — remove the SSH dialer
+- **SSH:** Must work with stock sshd + `authorized_keys`
+- **Nginx:** Must support running behind existing nginx setups
+- **Binary:** Single static binary (CGO disabled)
+- **TUI:** Top-like request log, quit with 'q'
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Use external ssh command | System SSH is reliable, well-configured, handles edge cases | — Pending |
-| Remove internal SSH client | Reduces complexity, eliminates hang issues | — Pending |
-| Keep TUI minimal | Logs + status only, no complex features | — Pending |
+| Use external `ssh -R` | Proven, handles reconnection, no hangs | — Pending |
+| Nginx-friendly | Users have existing VPS setups | — Partial (mode exists) |
+| Bubble Tea TUI | Go-native, handles terminal UI well | — Partial (needs wiring) |
+| SQLite state | Simple, embedded, no external deps | ✓ Working |
+| Ed25519 auth | Modern, fast, simple key format | ✓ Working |
+
+## Research References
+
+- [awesome-tunneling](https://github.com/anderspitman/awesome-tunneling) — Tunneling tools comparison
+- [SirTunnel](https://github.com/anderspitman/SirTunnel) — Minimal SSH tunnel approach
+- [tunnelto.dev](https://tunnelto.dev/) — Developer-focused tunneling
+- [pyjam.as/tunnel](https://tunnel.pyjam.as/) — Bring-your-own-server tunnel
+- [Self-hosted ngrok with Nginx](https://jerrington.me/posts/2019-01-29-self-hosted-ngrok.html) — Nginx + SSH setup
+- [Go SSH reverse tunnel gist](https://gist.github.com/codref/473351a24a3ef90162cf10857fac0ff3) — Reference implementation
 
 ---
-*Last updated: 2026-02-18 after code review*
+*Last updated: 2026-02-18 with full spec context*
