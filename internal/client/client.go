@@ -43,16 +43,19 @@ type Config struct {
 }
 
 type Client struct {
-	cfg          Config
-	log          zerolog.Logger
-	upstream     string
-	reconnectMin time.Duration
-	reconnectMax time.Duration
-	uiProgram    *tea.Program
-	uiOnce       sync.Once
-	ctx          context.Context
-	cancel       context.CancelFunc
-	sshCmd       *exec.Cmd
+	cfg            Config
+	log            zerolog.Logger
+	upstream       string
+	reconnectMin   time.Duration
+	reconnectMax   time.Duration
+	uiProgram      *tea.Program
+	uiOnce         sync.Once
+	ctx            context.Context
+	cancel         context.CancelFunc
+	sshCmd         *exec.Cmd
+	eventsClient   *http.Client
+	pollInterval   time.Duration
+	lastEventIndex int // Track which events we've already sent
 }
 
 func New(cfg Config) (*Client, error) {
@@ -81,6 +84,10 @@ func New(cfg Config) (*Client, error) {
 		reconnectMax: cfg.ReconnectMax,
 		ctx:          ctx,
 		cancel:       cancel,
+		eventsClient: &http.Client{
+			Timeout: 5 * time.Second,
+		},
+		pollInterval: time.Second, // Poll every second per locked decision
 	}
 	if cfg.EnableTUI {
 		model := tui.NewModel(cfg.Subdomain)
@@ -415,4 +422,30 @@ func (c *Client) Close() error {
 		c.sshCmd.Wait()
 	}
 	return nil
+}
+
+func (c *Client) startEventPolling(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(c.pollInterval)
+		defer ticker.Stop()
+
+		backoff := c.reconnectMin
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := c.pollAndForwardEvents(); err != nil {
+					c.log.Warn().Err(err).Msg("event poll failed, backing off")
+					time.Sleep(backoff)
+					backoff *= 2
+					if backoff > c.reconnectMax {
+						backoff = c.reconnectMax
+					}
+				} else {
+					backoff = c.reconnectMin // Reset on success
+				}
+			}
+		}
+	}()
 }
