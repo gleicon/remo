@@ -202,14 +202,15 @@ func (m Model) View() string {
 	if m.lastError != "" {
 		statusLine += fmt.Sprintf(" | last error: %s", m.lastError)
 	}
-	if m.paused {
-		statusLine += " | paused"
-	}
 	if m.showErrorsOnly {
-		statusLine += " | errors"
+		statusLine += " | errors only"
 	}
 	statusLine += fmt.Sprintf(" | req %d err %d bytes %d/%d avg %.1fms", m.stats.RequestCount, m.stats.ErrorCount, m.stats.BytesIn, m.stats.BytesOut, m.stats.avgLatency())
 	b.WriteString(status.Render(statusLine))
+	if m.paused {
+		pausedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+		b.WriteString(" " + pausedStyle.Render("[PAUSED]"))
+	}
 	b.WriteString("\n")
 	if m.url != "" {
 		b.WriteString(url.Render("→ " + m.url + "\n"))
@@ -225,7 +226,12 @@ func (m Model) View() string {
 		b.WriteString("\n")
 	}
 	if len(m.logs) == 0 {
-		b.WriteString("  waiting for traffic...\n")
+		if m.paused {
+			pauseStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Italic(true)
+			b.WriteString(pauseStyle.Render("  -- Polling paused, press 'p' to resume --\n"))
+		} else {
+			b.WriteString("  waiting for traffic...\n")
+		}
 		b.WriteString("\n")
 		b.WriteString(m.helpFooter())
 		return b.String()
