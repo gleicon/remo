@@ -77,6 +77,12 @@ Plans:
 
 ## Phase 3: Nginx & Documentation
 
+**Plans:** 2 plans in 2 waves
+
+Plans:
+- [ ] 03-nginx-documentation-01-PLAN.md — Create nginx config and SSH setup documentation
+- [ ] 03-nginx-documentation-02-PLAN.md — Rewrite README with architecture and quick start
+
 **Goal:** Production-ready with nginx, full documentation
 
 **Requirements:** NGX-02, NGX-03, DOC-01, DOC-02
