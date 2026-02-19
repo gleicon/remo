@@ -42,6 +42,17 @@ type Config struct {
 	RemotePort   int
 }
 
+type requestLogEntry struct {
+	Time     time.Time     `json:"time"`
+	Method   string        `json:"method"`
+	Path     string        `json:"path"`
+	Status   int           `json:"status"`
+	Latency  time.Duration `json:"latency"`
+	Remote   string        `json:"remote"`
+	BytesIn  int           `json:"bytes_in"`
+	BytesOut int           `json:"bytes_out"`
+}
+
 type Client struct {
 	cfg            Config
 	log            zerolog.Logger
@@ -56,6 +67,9 @@ type Client struct {
 	eventsClient   *http.Client
 	pollInterval   time.Duration
 	lastEventIndex int // Track which events we've already sent
+	exportedLogs   []requestLogEntry
+	logsMu         sync.RWMutex
+	quitResult     chan tui.QuitMsg
 }
 
 func New(cfg Config) (*Client, error) {
@@ -403,12 +417,61 @@ func (c *Client) startUI() {
 		return
 	}
 	c.uiOnce.Do(func() {
+		c.quitResult = make(chan tui.QuitMsg, 1)
 		go func() {
-			if err := c.uiProgram.Start(); err != nil {
-				c.log.Error().Err(err).Msg("tui exited")
+			m, err := c.uiProgram.Run()
+			if err != nil {
+				c.log.Error().Err(err).Msg("tui exited with error")
+			}
+			// Extract quit message from final model state
+			if model, ok := m.(tui.Model); ok {
+				quitMsg := tui.QuitMsg{Export: model.ExportRequested()}
+				c.quitResult <- quitMsg
+			} else {
+				c.quitResult <- tui.QuitMsg{Export: false}
 			}
 		}()
 	})
+}
+
+func (c *Client) exportLogToFile() (string, error) {
+	timestamp := time.Now().Format("20060102-150405")
+	filename := fmt.Sprintf("remo-log-%s-%s.json", c.cfg.Subdomain, timestamp)
+
+	c.logsMu.RLock()
+	logs := make([]requestLogEntry, len(c.exportedLogs))
+	copy(logs, c.exportedLogs)
+	c.logsMu.RUnlock()
+
+	data, err := json.MarshalIndent(logs, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal logs: %w", err)
+	}
+
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		return "", fmt.Errorf("write file: %w", err)
+	}
+
+	return filename, nil
+}
+
+func (c *Client) handleQuit() {
+	if c.quitResult == nil {
+		return
+	}
+	select {
+	case quitMsg := <-c.quitResult:
+		if quitMsg.Export {
+			filename, err := c.exportLogToFile()
+			if err != nil {
+				c.log.Error().Err(err).Msg("Failed to export logs")
+			} else {
+				c.log.Info().Str("file", filename).Msg("Session log exported")
+			}
+		}
+	case <-time.After(100 * time.Millisecond):
+		// Non-blocking check - if no result yet, continue
+	}
 }
 
 func (c *Client) sendUI(msg tea.Msg) {
@@ -424,6 +487,8 @@ func (c *Client) Close() error {
 		c.sshCmd.Process.Kill()
 		c.sshCmd.Wait()
 	}
+	// Handle any pending quit/export
+	c.handleQuit()
 	return nil
 }
 
@@ -480,7 +545,7 @@ func (c *Client) pollAndForwardEvents() error {
 		return fmt.Errorf("decode events: %w", err)
 	}
 
-	// Forward new events to TUI
+	// Forward new events to TUI and store for export
 	for i := c.lastEventIndex; i < len(events); i++ {
 		evt := events[i]
 		c.sendUI(tui.RequestLogMsg{
@@ -493,6 +558,24 @@ func (c *Client) pollAndForwardEvents() error {
 			BytesIn:  evt.BytesIn,
 			BytesOut: evt.BytesOut,
 		})
+
+		// Store for export
+		c.logsMu.Lock()
+		c.exportedLogs = append(c.exportedLogs, requestLogEntry{
+			Time:     evt.Time,
+			Method:   evt.Method,
+			Path:     evt.Path,
+			Status:   evt.Status,
+			Latency:  evt.Latency,
+			Remote:   evt.Remote,
+			BytesIn:  evt.BytesIn,
+			BytesOut: evt.BytesOut,
+		})
+		// Limit to max 100 entries
+		if len(c.exportedLogs) > 100 {
+			c.exportedLogs = c.exportedLogs[len(c.exportedLogs)-100:]
+		}
+		c.logsMu.Unlock()
 	}
 
 	c.lastEventIndex = len(events)

@@ -350,3 +350,8 @@ func max(a, b int) int {
 	}
 	return a
 }
+
+// ExportRequested returns whether the user requested log export
+func (m Model) ExportRequested() bool {
+	return m.exportAnswer == "y"
+}
