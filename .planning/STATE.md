@@ -1,27 +1,23 @@
 # State: Remo Project
 
 **Project:** Remo  
-**Current Phase:** 02
-**Current Plan:** Not started
-**Last Action:** Completed 02-tui-request-logging-05-PLAN.md - Session statistics tracking and log export
+**Current Phase:** 03
+**Current Plan:** 01
+**Last Action:** Completed 03-nginx-documentation-01-PLAN.md - Nginx config and SSH setup documentation
 **Updated:** 2026-02-19
 
 ---
 
 ## Current Position
 
-Plan 05 complete: TUI now displays real-time session statistics and supports JSON log export.
+Plan 01 complete: Created comprehensive nginx and SSH documentation for production deployment.
 
-- Statistics header shows "req {N} err {N} bytes {in}/{out} avg {N}ms" in gray color
-- RequestCount, ErrorCount, BytesIn, BytesOut, TotalLatency tracked in SessionStats
-- Error count increments for HTTP status >= 400
-- 'c' key clears both logs and statistics (resets to zero)
-- Log export to JSON with filename format: remo-log-{subdomain}-{timestamp}.json
-- Export triggered when user answers 'y' to quit prompt
-- Client stores up to 100 logs locally for export
-- Requirements TUI-05 addressed
+- docs/nginx-example.conf: Production nginx config with wildcard subdomain SSL and WebSocket support
+- docs/nginx.md: Complete Let's Encrypt setup guide with DNS wildcard instructions
+- docs/ssh-setup.md: SSH key generation, authorization, and subdomain restriction guide
+- Requirements NGX-02, NGX-03, DOC-02 addressed
 
-**Next:** Phase 02 complete - all plans finished
+**Next:** Phase 03 complete - all plans finished
 
 ---
 
@@ -31,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 
 **Core value:** Users can expose local services through public subdomains using only system SSH, with minimal client complexity
 
-**Current focus:** Phase 2 — TUI Request Logging (5/5 plans complete)
+**Current focus:** Phase 3 — Nginx Documentation (1/1 plans complete)
 
 ---
 
@@ -41,27 +37,27 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 |-------|--------|--------------|-------|
 | 1 | ✓ Complete | 6 | 1/1 |
 | 2 | ✓ Complete | 7 | 5/5 |
-| 3 | ○ Not started | 3 | 0/1 |
+| 3 | ✓ Complete | 3 | 1/1 |
 
 ---
 
 ## Recent Decisions
 
-1. **Request event capture approach** — Circular buffer with RWMutex for thread-safe access
-2. **Localhost-only /events access** — Ensures events only accessible through SSH tunnel
-3. **Event structure matching** — RequestEvent mirrors tui.RequestLogMsg for consistency
-4. **Recording response writer** — Wraps http.ResponseWriter to capture status and bytes
-5. **Polling interval** — 1 second polling balances real-time feel with resource usage
-6. **Event deduplication** — lastEventIndex prevents duplicate forwarding to TUI
-7. **Status code color scheme** — Green 2xx, Blue 3xx, Yellow 4xx, Red 5xx per HTTP conventions
-8. **Path wrapping** — Multi-line display for paths >40 chars instead of truncation
-9. **Terminal height adaptation** — Reserve 3 header + 1 footer lines, use remaining space for logs
-10. **Export prompt state machine** — exportPrompt flag intercepts all key input until resolved
-11. **Error filter predicate** — shouldShowEntry() combines text filter and error-only filter
-12. **PAUSED indicator styling** — Red bold text for high visibility in status bar
-13. **Statistics format** — "req {N} err {N} bytes {in}/{out} avg {N}ms" for compact display
-14. **Gray statistics color** — lipgloss.Color("241") for subtle, non-intrusive stats line
-15. **Log export storage** — Client maintains circular buffer of 100 most recent requests
+1. **Nginx upstream address** — Used 127.0.0.1:18080 as upstream (Remo's default behind-proxy mode)
+2. **SSH key algorithm** — Documented Ed25519 as preferred over RSA for better security and performance
+3. **Documentation structure** — Included comprehensive comments in nginx config explaining each directive
+4. **Subdomain rules format** — Documented `*` (any), `prefix-*` (wildcard), and `exact-name` (specific) patterns
+5. **Request event capture approach** — Circular buffer with RWMutex for thread-safe access
+6. **Localhost-only /events access** — Ensures events only accessible through SSH tunnel
+7. **Event structure matching** — RequestEvent mirrors tui.RequestLogMsg for consistency
+8. **Recording response writer** — Wraps http.ResponseWriter to capture status and bytes
+9. **Polling interval** — 1 second polling balances real-time feel with resource usage
+10. **Event deduplication** — lastEventIndex prevents duplicate forwarding to TUI
+11. **Status code color scheme** — Green 2xx, Blue 3xx, Yellow 4xx, Red 5xx per HTTP conventions
+12. **Path wrapping** — Multi-line display for paths >40 chars instead of truncation
+13. **Terminal height adaptation** — Reserve 3 header + 1 footer lines, use remaining space for logs
+14. **Export prompt state machine** — exportPrompt flag intercepts all key input until resolved
+15. **Error filter predicate** — shouldShowEntry() combines text filter and error-only filter
 
 ---
 
@@ -77,7 +73,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 ## Session Continuity
 
 **Started:** 2026-02-18
-**Last Session:** 2026-02-19T03:49:00Z
-**Context:** Completed 02-tui-request-logging-05-PLAN.md. TUI displays real-time session statistics and client exports logs to JSON on quit.
+**Last Session:** 2026-02-19T19:14:16.388Z
+**Context:** Completed 03-nginx-documentation-01-PLAN.md. Created nginx config example, Let's Encrypt setup guide, and SSH key documentation.
 
 ---
