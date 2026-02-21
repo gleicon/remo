@@ -30,6 +30,7 @@ import (
 type Config struct {
 	Server       string
 	ServerPort   int
+	SSHUser      string
 	Subdomain    string
 	URL          string
 	UpstreamURL  string
@@ -207,6 +208,10 @@ func (c *Client) runSession(ctx context.Context) error {
 	// -R 0:localhost:18080: reverse tunnel with auto port allocation
 	// -o StrictHostKeyChecking=no: accept any host key
 	// -i: identity file path
+	sshUser := c.cfg.SSHUser
+	if sshUser == "" {
+		sshUser = "remo"
+	}
 	args := []string{
 		"-v",
 		"-N",
@@ -215,7 +220,7 @@ func (c *Client) runSession(ctx context.Context) error {
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "BatchMode=yes",
 		"-i", keyPath,
-		fmt.Sprintf("remo@%s", server),
+		fmt.Sprintf("%s@%s", sshUser, server),
 	}
 
 	c.log.Info().Str("server", server).Str("upstream", c.upstream).Msg("starting ssh tunnel")

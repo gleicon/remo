@@ -71,15 +71,46 @@ ssh-keygen -t rsa -b 4096 -C "remo-client-$(whoami)@$(hostname)" -f ~/.ssh/remo_
 
 ## 2. Server Key Authorization
 
-### Authorized Keys Location
+### The `remo` User
 
-On the Remo server, authorized keys are stored at:
+Remo uses a dedicated system user named `remo` for all SSH connections. The [setup script](../scripts/remo-server-setup.sh) creates this user automatically with proper permissions.
+
+**Default Configuration:**
+- User: `remo`
+- Home directory: `/home/remo`
+- SSH directory: `/home/remo/.ssh/`
+- Authorized keys: `/etc/remo/authorized.keys`
+
+### Adding Client Keys
+
+**Option 1: Interactive Setup (Recommended)**
+
+When running the server setup script, you'll be prompted to enter client public keys interactively:
 
 ```
-/home/remo/.ssh/authorized_keys
+[STEP] Client Key Setup
+
+Enter client public key (or 'done' to finish): IOeSz4bIwnKD7jB9fDQTQE8/Hp9iy2qsyEWB0Zd3RfI=
+Enter subdomain rule [default: *]: *
+[INFO]  Added key with rule: *
+
+Enter client public key (or 'done' to finish): done
 ```
 
-If the file doesn't exist, create it with proper permissions.
+**Option 2: Manual Addition**
+
+Add keys manually to the authorized keys file:
+
+```bash
+# Add a key with full access (any subdomain)
+echo 'IOeSz4bIwnKD7jB9fDQTQE8/Hp9iy2qsyEWB0Zd3RfI= *' | sudo tee -a /etc/remo/authorized.keys
+
+# Add a key restricted to specific subdomain
+echo 'sCz7/6ZlL2ujzkxmnxhqJ3I6TS7DEFid9nDl56x/FrI= myapp' | sudo tee -a /etc/remo/authorized.keys
+
+# Add a key with wildcard prefix
+echo 'uzuXy6zSubQWgUwfgaz/fC07RzdfXOaiosWDjLBpWkU= dev-*' | sudo tee -a /etc/remo/authorized.keys
+```
 
 ### Key Format with Subdomain Rules
 

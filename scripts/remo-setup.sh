@@ -180,10 +180,16 @@ setup_server() {
     info "Setting up remo server..."
     download_binary
 
-    # Create remo user
+    # Create remo user with home directory
     if ! id "$REMO_USER" >/dev/null 2>&1; then
-        info "Creating system user '$REMO_USER'..."
-        useradd --system --no-create-home --shell /bin/false "$REMO_USER" || true
+        info "Creating system user '$REMO_USER' with home directory..."
+        useradd --system --create-home --home-dir "/home/$REMO_USER" --shell /bin/bash "$REMO_USER" || true
+    fi
+
+    # Ensure home directory exists
+    if [ ! -d "/home/$REMO_USER" ]; then
+        mkdir -p "/home/$REMO_USER"
+        chown "$REMO_USER:$REMO_USER" "/home/$REMO_USER"
     fi
 
     # SSH directory

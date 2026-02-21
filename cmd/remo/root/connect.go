@@ -58,7 +58,7 @@ func runConnect(r *rootCommand, opts *connectOptions) error {
 		return fmt.Errorf("load identity: %w", err)
 	}
 
-	server, serverPort, err := parseServer(opts.server)
+	server, serverPort, sshUser, err := parseServer(opts.server)
 	if err != nil {
 		return fmt.Errorf("parse server: %w", err)
 	}
@@ -66,6 +66,7 @@ func runConnect(r *rootCommand, opts *connectOptions) error {
 	clientCfg := client.Config{
 		Server:      server,
 		ServerPort:  serverPort,
+		SSHUser:     sshUser,
 		Subdomain:   opts.subdomain,
 		UpstreamURL: opts.upstream,
 		Logger:      logger,
@@ -80,12 +81,12 @@ func runConnect(r *rootCommand, opts *connectOptions) error {
 	return cl.Run(r.Context())
 }
 
-func parseServer(s string) (host string, port int, err error) {
+func parseServer(s string) (host string, port int, user string, err error) {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "ssh://") {
 		u, err := url.Parse(s)
 		if err != nil {
-			return "", 0, err
+			return "", 0, "", err
 		}
 		host = u.Hostname()
 		portStr := u.Port()
@@ -94,14 +95,15 @@ func parseServer(s string) (host string, port int, err error) {
 		} else {
 			port, err = strconv.Atoi(portStr)
 			if err != nil {
-				return "", 0, err
+				return "", 0, "", err
 			}
 		}
-		return host, port, nil
+		return host, port, "", nil
 	}
 
 	parts := strings.Split(s, "@")
 	if len(parts) == 2 {
+		user = parts[0]
 		host = parts[1]
 	} else {
 		host = parts[0]
@@ -117,15 +119,15 @@ func parseServer(s string) (host string, port int, err error) {
 		host = host[:idx]
 		port, err = strconv.Atoi(portStr)
 		if err != nil {
-			return "", 0, fmt.Errorf("invalid port: %w", err)
+			return "", 0, "", fmt.Errorf("invalid port: %w", err)
 		}
 	} else {
 		port = 22
 	}
 
 	if net.ParseIP(host) != nil || host == "localhost" {
-		return host, port, nil
+		return host, port, user, nil
 	}
 
-	return host, port, nil
+	return host, port, user, nil
 }

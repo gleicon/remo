@@ -91,25 +91,55 @@ This installs the `remo` binary and generates your SSH identity at `~/.remo/iden
 cat ~/.remo/identity.json | jq -r '.public_key'
 ```
 
-### Step 2: Set Up the Server
+### Step 2: Set Up the Server (Fresh Ubuntu VPS)
 
-**Option A: Full Setup (standalone with Let's Encrypt)**
+**Requirements:**
+- Fresh Ubuntu 20.04/22.04/24.04 VPS
+- Root access (sudo)
+- Domain name with DNS A record pointing to your VPS IP
 
-```bash
-sudo curl -sL https://raw.githubusercontent.com/gleicon/remo/main/scripts/remo-setup.sh | bash -s -- server \
-  --domain yourdomain.tld
-```
-
-**Option B: Behind Nginx (recommended for production)**
+**Run the interactive setup:**
 
 ```bash
-sudo curl -sL https://raw.githubusercontent.com/gleicon/remo/main/scripts/remo-setup.sh | bash -s -- server \
-  --domain yourdomain.tld \
-  --behind-proxy \
-  --skip-certs
+# On your VPS (as root)
+curl -sL https://raw.githubusercontent.com/gleicon/remo/main/scripts/remo-server-setup.sh | sudo bash
 ```
 
-For detailed nginx setup with SSL, see [docs/nginx.md](docs/nginx.md).
+**What the script does:**
+1. ✅ Updates system packages
+2. ✅ Creates `remo` user with proper permissions
+3. ✅ Downloads and installs remo from GitHub releases
+4. ✅ Prompts for your domain and deployment mode
+5. ✅ Generates admin secret and server configuration
+6. ✅ **Interactively prompts for client public keys**
+7. ✅ Creates and starts systemd service
+
+**Example setup flow:**
+```
+[STEP] Configuring Remo server...
+Enter your domain (e.g., remoapps.site): cloud.remoapps.site
+Select deployment mode:
+  1) Standalone (Remo handles SSL directly)
+  2) Behind Nginx (Use nginx as reverse proxy)
+Choice [1-2]: 2
+
+[STEP] Client Key Setup
+You can add client public keys now...
+
+Enter client public key (or 'done' to finish): IOeSz4bIwnKD7jB9fDQTQE8/Hp9iy2qsyEWB0Zd3RfI=
+Enter subdomain rule [default: *]: *
+[INFO]  Added key with rule: *
+
+Enter client public key (or 'done' to finish): done
+
+[INFO]  Remo service is running
+```
+
+**Deployment Modes:**
+- **Standalone**: Remo handles SSL directly using Let's Encrypt (good for testing)
+- **Behind Nginx**: Uses nginx as reverse proxy with SSL termination (recommended for production)
+
+For detailed nginx setup with Let's Encrypt, see [docs/nginx.md](docs/nginx.md).
 
 ### Step 3: Connect and Expose a Service
 
