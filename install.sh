@@ -19,7 +19,12 @@ NC='\033[0m'
 info() { printf "${GREEN}[INFO]${NC} %s\n" "$*"; }
 warn() { printf "${YELLOW}[WARN]${NC} %s\n" "$*"; }
 error() { printf "${RED}[ERROR]${NC} %s\n" "$*" >&2; }
-ask() { printf "${BOLD}%s${NC} " "$*"; }
+ask() { printf "${BOLD}%s${NC} " "$*" >&2; }
+
+# Read from terminal even when piped
+read_input() {
+    read -r "$1" </dev/tty
+}
 
 # Detect OS and arch
 detect_platform() {
@@ -61,10 +66,10 @@ install_server() {
     
     # Ask configuration
     ask "Domain (e.g., remo.example.com):"
-    read DOMAIN
+    read_input DOMAIN
     
     ask "Behind nginx proxy? [Y/n]:"
-    read BEHIND_PROXY
+    read_input BEHIND_PROXY
     
     # Generate admin secret
     ADMIN_SECRET=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
@@ -88,7 +93,7 @@ EOF
         info "Created behind-proxy config"
     else
         ask "Email for Let's Encrypt:"
-        read EMAIL
+        read_input EMAIL
         cat > /etc/remo/server.yaml <<EOF
 listen: ":443"
 domain: "$DOMAIN"
@@ -115,7 +120,7 @@ EOF
     
     while true; do
         ask "Client key (or Enter to finish):"
-        read KEY
+        read_input KEY
         [ -z "$KEY" ] && break
         echo "$KEY" >> /etc/remo/authorized.keys
         info "Added key"
@@ -167,10 +172,10 @@ install_client() {
     
     # Ask configuration
     ask "Server domain (e.g., remo.example.com):"
-    read SERVER
+    read_input SERVER
     
     ask "SSH key path [~/.ssh/id_rsa]:"
-    read SSH_KEY
+    read_input SSH_KEY
     SSH_KEY=${SSH_KEY:-~/.ssh/id_rsa}
     
     # Generate identity
@@ -196,10 +201,10 @@ EOF
     
     # Test connection
     ask "Test connection now? [Y/n]:"
-    read TEST
+    read_input TEST
     if [[ ! "$TEST" =~ ^[Nn]$ ]]; then
         ask "Subdomain to test:"
-        read SUBDOMAIN
+        read_input SUBDOMAIN
         $BINARY connect --server $SERVER --subdomain $SUBDOMAIN --upstream http://127.0.0.1:3000
     fi
     
@@ -222,10 +227,10 @@ if [ "$(id -u)" = "0" ]; then
     info "Detected: Server mode (running as root)"
 else
     ask "Install as [s]erver or [c]lient? [c]:"
-    read MODE_CHOICE
+    read_input MODE_CHOICE
     MODE=${MODE_CHOICE:-c}
     if [[ "$MODE" =~ ^[Ss]$ ]]; then
-        error "Server install requires root. Run with sudo."
+        error "Server install requires root. Run: curl -sL ... | bash"
         exit 1
     fi
     MODE="client"
