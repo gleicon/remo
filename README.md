@@ -71,7 +71,7 @@ Data Flow:
 
 ```bash
 # Run as root on your Ubuntu VPS
-curl -sL https://raw.githubusercontent.com/gleicon/remo/main/install.sh | sudo bash
+curl -sL https://raw.githubusercontent.com/gleicon/remo/main/install.sh | bash
 ```
 
 The installer will ask for:
