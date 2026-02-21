@@ -67,102 +67,39 @@ Data Flow:
 
 ## Quick Start
 
-### Prerequisites
-
-- **Go 1.21+** (for building from source) or use pre-built binaries
-- **SSH client** (OpenSSH) on your local machine
-- **Domain name** with DNS access to configure wildcard records
-- **Server** with public IP (VPS, cloud instance, etc.)
-
-### Step 1: Install the Client
+### Install Server (on your VPS)
 
 ```bash
-# Using the install script
-curl -sL https://raw.githubusercontent.com/gleicon/remo/main/scripts/remo-setup.sh | bash
-
-# Or download latest release manually
-# See: https://github.com/gleicon/remo/releases
+# Run as root on your Ubuntu VPS
+curl -sL https://raw.githubusercontent.com/gleicon/remo/main/install.sh | sudo bash
 ```
 
-This installs the `remo` binary and generates your SSH identity at `~/.remo/identity.json`.
+The installer will ask for:
+- Domain name (e.g., `remo.example.com`)
+- Behind nginx proxy? (Y/n)
+- Client SSH public keys (interactive)
 
-**Show your public key** (to share with server admin):
-```bash
-cat ~/.remo/identity.json | jq -r '.public_key'
-```
+Then starts the systemd service automatically.
 
-### Step 2: Set Up the Server (Fresh Ubuntu VPS)
-
-**Requirements:**
-- Fresh Ubuntu 20.04/22.04/24.04 VPS
-- Root access (sudo)
-- Domain name with DNS A record pointing to your VPS IP
-
-**Run the interactive setup:**
+### Install Client (on your laptop)
 
 ```bash
-# On your VPS (as root)
-curl -sL https://raw.githubusercontent.com/gleicon/remo/main/scripts/remo-server-setup.sh | sudo bash
+# Run on your local machine
+curl -sL https://raw.githubusercontent.com/gleicon/remo/main/install.sh | bash
 ```
 
-**What the script does:**
-1. ✅ Updates system packages
-2. ✅ Creates `remo` user with proper permissions
-3. ✅ Downloads and installs remo from GitHub releases
-4. ✅ Prompts for your domain and deployment mode
-5. ✅ Generates admin secret and server configuration
-6. ✅ **Interactively prompts for client public keys**
-7. ✅ Creates and starts systemd service
+The installer will ask for:
+- Server domain
+- SSH key path (default: ~/.ssh/id_rsa)
+- Test connection?
 
-**Example setup flow:**
-```
-[STEP] Configuring Remo server...
-Enter your domain (e.g., remoapps.site): cloud.remoapps.site
-Select deployment mode:
-  1) Standalone (Remo handles SSL directly)
-  2) Behind Nginx (Use nginx as reverse proxy)
-Choice [1-2]: 2
-
-[STEP] Client Key Setup
-You can add client public keys now...
-
-Enter client public key (or 'done' to finish): IOeSz4bIwnKD7jB9fDQTQE8/Hp9iy2qsyEWB0Zd3RfI=
-Enter subdomain rule [default: *]: *
-[INFO]  Added key with rule: *
-
-Enter client public key (or 'done' to finish): done
-
-[INFO]  Remo service is running
-```
-
-**Deployment Modes:**
-- **Standalone**: Remo handles SSL directly using Let's Encrypt (good for testing)
-- **Behind Nginx**: Uses nginx as reverse proxy with SSL termination (recommended for production)
-
-For detailed nginx setup with Let's Encrypt, see [docs/nginx.md](docs/nginx.md).
-
-### Step 3: Connect and Expose a Service
+### Connect
 
 ```bash
-# Expose your local service on a public subdomain
-remo connect \
-  --server yourserver.com \
-  --subdomain myapp \
-  --upstream http://127.0.0.1:3000 \
-  --tui
+remo connect --server yourdomain.com --subdomain myapp --upstream http://127.0.0.1:3000 --tui
 ```
 
-Your service is now available at: **`https://myapp.yourdomain.tld`**
-
-**Expected output:**
-```
-✓ Connected to yourserver.com:22
-✓ Registered subdomain: myapp.yourdomain.tld
-✓ Tunnel active: myapp.yourdomain.tld → http://127.0.0.1:3000
-✓ TUI dashboard started
-
-Press 'q' to quit, 'h' for help
-```
+Your service is now available at: **`https://myapp.yourdomain.com`**
 
 ---
 
