@@ -36,6 +36,7 @@ type Config struct {
 	SubdomainPrefix string
 	Logger          zerolog.Logger
 	ReadTimeout     time.Duration
+	TunnelTimeout   time.Duration // Timeout for tunnel health checks (default 5m)
 	Authorizer      *auth.AuthorizedKeys
 	Mode            Mode
 	TLSCertFile     string
@@ -83,10 +84,13 @@ func New(cfg Config) *Server {
 	if cfg.TrustedHops == 0 {
 		cfg.TrustedHops = 1
 	}
+	if cfg.TunnelTimeout == 0 {
+		cfg.TunnelTimeout = 5 * time.Minute // Default 5 minute timeout
+	}
 	return &Server{
 		cfg:           cfg,
 		log:           cfg.Logger,
-		registry:      newRegistry(),
+		registry:      newRegistry(cfg.TunnelTimeout),
 		store:         cfg.Store,
 		started:       time.Now(),
 		metrics:       newMetrics(),
@@ -119,10 +123,13 @@ func generateRandomSubdomain() (string, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/register", s.handleRegister)
+	mux.HandleFunc("/unregister", s.handleUnregister)
+	mux.HandleFunc("/ping", s.handlePing)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/events", s.handleEvents)
+	mux.HandleFunc("/admin/cleanup", s.handleAdminCleanup)
 	mux.HandleFunc("/", s.handleProxy)
 	return mux
 }
@@ -140,6 +147,9 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 		defer cancel()
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
+
+	// Start cleanup goroutine to remove stale tunnels
+	go s.cleanupLoop(ctx)
 
 	switch s.cfg.Mode {
 	case ModeStandalone:
@@ -280,6 +290,124 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		"subdomain": subdomain,
 		"url":       fullURL,
 		"status":    "ok",
+	})
+}
+
+// handlePing receives health check pings from clients to keep tunnel alive
+func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	authorizedKey := r.Header.Get("X-Remo-Publickey")
+	if authorizedKey == "" {
+		http.Error(w, "missing X-Remo-Publickey header", http.StatusBadRequest)
+		return
+	}
+
+	subdomain := r.URL.Query().Get("subdomain")
+	if subdomain == "" {
+		http.Error(w, "missing subdomain parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Verify the tunnel exists and belongs to this pubkey
+	_, pubKey, ok := s.registry.get(subdomain)
+	if !ok {
+		http.Error(w, "tunnel not found", http.StatusNotFound)
+		return
+	}
+
+	if pubKey != authorizedKey {
+		http.Error(w, "unauthorized", http.StatusForbidden)
+		return
+	}
+
+	// Update last ping time
+	if !s.registry.ping(subdomain) {
+		http.Error(w, "tunnel not found", http.StatusNotFound)
+		return
+	}
+
+	s.log.Debug().Str("subdomain", subdomain).Msg("health check ping received")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":    "ok",
+		"subdomain": subdomain,
+	})
+}
+
+// handleUnregister allows clients to explicitly unregister on shutdown
+func (s *Server) handleUnregister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	authorizedKey := r.Header.Get("X-Remo-Publickey")
+	if authorizedKey == "" {
+		http.Error(w, "missing X-Remo-Publickey header", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Subdomain string `json:"subdomain"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify ownership
+	_, pubKey, ok := s.registry.get(req.Subdomain)
+	if !ok {
+		http.Error(w, "tunnel not found", http.StatusNotFound)
+		return
+	}
+
+	if pubKey != authorizedKey {
+		http.Error(w, "unauthorized", http.StatusForbidden)
+		return
+	}
+
+	s.registry.unregister(req.Subdomain)
+	s.log.Info().Str("subdomain", req.Subdomain).Msg("tunnel unregistered")
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":    "unregistered",
+		"subdomain": req.Subdomain,
+	})
+}
+
+// handleAdminCleanup allows admin to manually clean up stale tunnels
+func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
+	// Check admin secret
+	secret := r.Header.Get("X-Admin-Secret")
+	if secret != s.cfg.AdminSecret {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Run cleanup
+	removed := s.registry.cleanup()
+	total, stale := s.registry.getStats()
+
+	s.log.Info().Int("removed", removed).Int("total", total).Int("stale", stale).Msg("admin cleanup executed")
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"removed": removed,
+		"total":   total,
+		"stale":   stale,
 	})
 }
 
@@ -597,5 +725,28 @@ func (m *metrics) snapshot() metricsSnapshot {
 		TotalErrors:   m.errors.Load(),
 		BytesIn:       m.bytesIn.Load(),
 		BytesOut:      m.bytesOut.Load(),
+	}
+}
+
+// cleanupLoop periodically removes stale tunnels
+func (s *Server) cleanupLoop(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			removed := s.registry.cleanup()
+			if removed > 0 {
+				total, stale := s.registry.getStats()
+				s.log.Info().
+					Int("removed", removed).
+					Int("total_active", total).
+					Int("stale_remaining", stale).
+					Msg("cleaned up stale tunnels")
+			}
+		}
 	}
 }

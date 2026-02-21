@@ -284,11 +284,18 @@ func (c *Client) runSession(ctx context.Context) error {
 	}
 	c.sendUI(tui.StateMsg{Connected: true})
 
+	// Start health check ping goroutine
+	pingCtx, cancelPing := context.WithCancel(ctx)
+	defer cancelPing()
+	go c.healthCheckLoop(pingCtx)
+
 	// Wait for SSH process to exit (this blocks until reconnection needed)
 	select {
 	case err := <-doneChan:
+		cancelPing()
 		return err
 	case <-ctx.Done():
+		cancelPing()
 		cmd.Process.Kill()
 		cmd.Wait()
 		return ctx.Err()
@@ -585,5 +592,49 @@ func (c *Client) pollAndForwardEvents() error {
 	}
 
 	c.lastEventIndex = len(events)
+	return nil
+}
+
+// healthCheckLoop sends periodic pings to the server to keep the tunnel alive
+func (c *Client) healthCheckLoop(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second) // Ping every 30 seconds
+	defer ticker.Stop()
+	
+	publicKeyBase64 := base64.StdEncoding.EncodeToString(c.cfg.Identity.Public)
+	
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := c.sendHealthPing(publicKeyBase64); err != nil {
+				c.log.Debug().Err(err).Msg("health ping failed")
+			}
+		}
+	}
+}
+
+// sendHealthPing sends a single health check ping to the server
+func (c *Client) sendHealthPing(publicKey string) error {
+	url := fmt.Sprintf("http://127.0.0.1:18080/ping?subdomain=%s", c.cfg.Subdomain)
+	
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Remo-Publickey", publicKey)
+	
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ping failed with status %d", resp.StatusCode)
+	}
+	
+	c.log.Debug().Str("subdomain", c.cfg.Subdomain).Msg("health ping sent")
 	return nil
 }
