@@ -215,6 +215,7 @@ func (c *Client) runSession(ctx context.Context) error {
 	args := []string{
 		"-v",
 		"-N",
+		"-L", "18080:localhost:18080",
 		"-R", fmt.Sprintf("0:localhost:%s", c.upstreamPort()),
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
