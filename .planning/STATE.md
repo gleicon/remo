@@ -1,24 +1,37 @@
 # State: Remo Project
 
 **Project:** Remo
-**Current Phase:** 03
-**Current Plan:** Not started
-**Last Action:** Completed 03-nginx-documentation-02-PLAN.md - README rewrite with comprehensive documentation
-**Updated:** 2026-02-19
+**Current Phase:** TUI Enhancement
+**Current Plan:** Complete
+**Last Action:** Completed TUI Enhancement Plan - All 5 phases implemented
+**Updated:** 2026-02-22
 
 ---
 
 ## Current Position
 
-Plan 02 complete: Rewrote README.md with comprehensive documentation including architecture diagram, quick start, TUI documentation, and cross-references.
+TUI Enhancement Plan complete: All 5 phases implemented, tested, and committed.
 
-- docs/nginx-example.conf: Production nginx config with wildcard subdomain SSL and WebSocket support
-- docs/nginx.md: Complete Let's Encrypt setup guide with DNS wildcard instructions
-- docs/ssh-setup.md: SSH key generation, authorization, and subdomain restriction guide
-- README.md: Comprehensive documentation with ASCII architecture diagram, quick start, TUI docs, admin auth, and troubleshooting
-- Requirements NGX-02, NGX-03, DOC-01, DOC-02 addressed
+**Phase 1: Full-Screen TUI** - Added tea.WithAltScreen() for alternate screen buffer mode
+**Phase 2: Connections View** - Tab-based view switching between Logs and Connections views
+**Phase 3: CLI Commands** - Added `remo connections` and `remo kill` commands with state management
+**Phase 4: Error Handling** - Changed 502 to 404 with X-Remo-Error headers for security
+**Phase 5: Inline Errors** - Added dismissible error banner in TUI
 
-**Next:** Phase 03 complete - all plans finished
+**Files Created:**
+- internal/state/state.go - Connection state management
+- cmd/remo/root/connections.go - Connections CLI command
+- cmd/remo/root/kill.go - Kill CLI command
+
+**Files Modified:**
+- internal/client/client.go - Alt screen mode
+- internal/server/server.go - 404 error responses
+- internal/tui/model.go - Tab views, error banner
+- cmd/remo/root/root.go - New commands
+
+**Summary:** .opencode/plans/TUI_ENHANCEMENT_SUMMARY.md
+
+**Next:** All phases complete - TUI enhancements ready for use
 
 ---
 
@@ -39,6 +52,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 | 1 | ✓ Complete | 6 | 1/1 |
 | 2 | ✓ Complete | 7 | 5/5 |
 | 3 | ✓ Complete | 3 | 2/2 |
+| TUI Enhancement | ✓ Complete | 5 | 5/5 |
 
 ---
 
@@ -62,6 +76,13 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 16. **ASCII architecture diagram** — Portable, renders everywhere without external dependencies
 17. **README structure** — Header → What is → Quick Start → How It Works → Configuration → Troubleshooting
 18. **Security documentation** — Explicit localhost-only /events access documented
+19. **AltScreen for TUI** — Using tea.WithAltScreen() for full-screen terminal mode
+20. **Tab view switching** — Tab/Shift+Tab cycles between Logs and Connections views
+21. **Connection state storage** — ~/.remo/state.json tracks active connections
+22. **404 vs 502 errors** — Both tunnel and upstream errors return 404 with X-Remo-Error header
+23. **Inline error display** — Dismissible error banner in TUI with type, message, and timestamp
+24. **Process termination** — Kill command uses os.FindProcess() and Kill() for safe termination
+25. **CLI confirmations** — Both single and bulk kill operations require user confirmation
 
 ---
 
@@ -77,7 +98,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 ## Session Continuity
 
 **Started:** 2026-02-18
-**Last Session:** 2026-02-19T19:18:58Z
-**Context:** Completed 03-nginx-documentation-02-PLAN.md. Rewrote README with comprehensive documentation including architecture diagram, TUI docs, and cross-references.
+**Last Session:** 2026-02-22
+**Context:** Completed TUI Enhancement Plan with all 5 phases: full-screen TUI, tab-based view switching, CLI commands (connections/kill), 404 error handling, and inline error banner.
 
 ---
