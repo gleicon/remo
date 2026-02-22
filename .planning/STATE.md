@@ -3,35 +3,35 @@
 **Project:** Remo
 **Current Phase:** TUI Enhancement
 **Current Plan:** Complete
-**Last Action:** Completed TUI Enhancement Plan - All 5 phases implemented
+**Last Action:** Completed Bug Fixes and Security Improvements Plan
 **Updated:** 2026-02-22
 
 ---
 
 ## Current Position
 
-TUI Enhancement Plan complete: All 5 phases implemented, tested, and committed.
+Bug Fixes and Security Improvements Plan complete: All 6 tasks implemented, tested, and committed.
 
-**Phase 1: Full-Screen TUI** - Added tea.WithAltScreen() for alternate screen buffer mode
-**Phase 2: Connections View** - Tab-based view switching between Logs and Connections views
-**Phase 3: CLI Commands** - Added `remo connections` and `remo kill` commands with state management
-**Phase 4: Error Handling** - Changed 502 to 404 with X-Remo-Error headers for security
-**Phase 5: Inline Errors** - Added dismissible error banner in TUI
+**Task 1: /connections Endpoint** - Server endpoint to list user's tunnels with status (active/stale)
+**Task 2: Client Polling** - 5-second polling to fetch connections and update TUI
+**Task 3: TUI Connections View** - Visual status indicators (green/yellow/red) with last ping time
+**Task 4: Rate Limiting** - Max 5 attempts per minute per IP on /admin/cleanup endpoint
+**Task 5: Error Headers** - Verified X-Remo-Error headers are debug-only with generic values
+**Task 6: State File Security** - Client state file with 0600 permissions, no SSH keys stored
 
 **Files Created:**
-- internal/state/state.go - Connection state management
-- cmd/remo/root/connections.go - Connections CLI command
-- cmd/remo/root/kill.go - Kill CLI command
+- internal/client/state.go - Client state management with secure permissions
 
 **Files Modified:**
-- internal/client/client.go - Alt screen mode
-- internal/server/server.go - 404 error responses
-- internal/tui/model.go - Tab views, error banner
-- cmd/remo/root/root.go - New commands
+- internal/server/server.go - /connections endpoint, rate limiting, error docs
+- internal/server/registry.go - Exported TunnelEntry, listByPubKey method
+- internal/client/client.go - Connections polling
+- internal/tui/model.go - Status indicators, last ping display
+- internal/server/server_test.go - Updated 502->404 expectations
 
-**Summary:** .opencode/plans/TUI_ENHANCEMENT_SUMMARY.md
+**Summary:** .opencode/plans/bugfix_security_SUMMARY.md
 
-**Next:** All phases complete - TUI enhancements ready for use
+**Next:** All security hardening complete - Connections view now functional
 
 ---
 
@@ -53,6 +53,7 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 | 2 | ✓ Complete | 7 | 5/5 |
 | 3 | ✓ Complete | 3 | 2/2 |
 | TUI Enhancement | ✓ Complete | 5 | 5/5 |
+| Bugfix/Security | ✓ Complete | 6 | 6/6 |
 
 ---
 
@@ -83,6 +84,11 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 23. **Inline error display** — Dismissible error banner in TUI with type, message, and timestamp
 24. **Process termination** — Kill command uses os.FindProcess() and Kill() for safe termination
 25. **CLI confirmations** — Both single and bulk kill operations require user confirmation
+26. **Connections endpoint** — /connections returns user's tunnels filtered by public key
+27. **Tunnel status tracking** — Active vs stale status based on last ping time
+28. **Rate limiting pattern** — IP-based sliding window, check before auth validation
+29. **State file permissions** — 0600 for files, 0750 for directories (no sensitive data)
+30. **Debug error headers** — Generic values only (no-tunnel, no-upstream), production-safe
 
 ---
 
@@ -99,6 +105,6 @@ See: .planning/PROJECT.md (updated 2026-02-18)
 
 **Started:** 2026-02-18
 **Last Session:** 2026-02-22
-**Context:** Completed TUI Enhancement Plan with all 5 phases: full-screen TUI, tab-based view switching, CLI commands (connections/kill), 404 error handling, and inline error banner.
+**Context:** Completed Bug Fixes and Security Improvements Plan with all 6 tasks: /connections endpoint, client polling, TUI connections view with status indicators, admin endpoint rate limiting, error header review, and secure client state file with 0600 permissions.
 
 ---
