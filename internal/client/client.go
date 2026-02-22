@@ -106,8 +106,8 @@ func New(cfg Config) (*Client, error) {
 	}
 	if cfg.EnableTUI {
 		model := tui.NewModel(cfg.Subdomain)
-		// Use WithContext so TUI can be cancelled via context
-		client.uiProgram = tea.NewProgram(model, tea.WithContext(ctx))
+		// Use WithAltScreen for full-screen TUI mode (like vim/htop)
+		client.uiProgram = tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
 	}
 	return client, nil
 }
