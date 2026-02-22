@@ -12,6 +12,39 @@ import (
 
 const maxLogs = 100
 
+// Color scheme - htop inspired
+type colors struct {
+	headerBg  lipgloss.Color
+	headerFg  lipgloss.Color
+	normal    lipgloss.Color
+	selected  lipgloss.Color
+	status2xx lipgloss.Color
+	status3xx lipgloss.Color
+	status4xx lipgloss.Color
+	status5xx lipgloss.Color
+	error     lipgloss.Color
+	warning   lipgloss.Color
+	success   lipgloss.Color
+	muted     lipgloss.Color
+	border    lipgloss.Color
+}
+
+var theme = colors{
+	headerBg:  lipgloss.Color("0"),   // Black background
+	headerFg:  lipgloss.Color("15"),  // White text
+	normal:    lipgloss.Color("250"), // Light gray
+	selected:  lipgloss.Color("33"),  // Blue
+	status2xx: lipgloss.Color("42"),  // Green
+	status3xx: lipgloss.Color("33"),  // Blue
+	status4xx: lipgloss.Color("220"), // Yellow
+	status5xx: lipgloss.Color("196"), // Red
+	error:     lipgloss.Color("196"), // Red
+	warning:   lipgloss.Color("220"), // Yellow
+	success:   lipgloss.Color("42"),  // Green
+	muted:     lipgloss.Color("240"), // Dark gray
+	border:    lipgloss.Color("238"), // Gray border
+}
+
 type Model struct {
 	subdomain      string
 	url            string
@@ -64,6 +97,7 @@ func NewModel(subdomain string) Model {
 	input := textinput.New()
 	input.Prompt = "/"
 	input.CharLimit = 64
+	input.Placeholder = "filter..."
 	return Model{subdomain: subdomain, filterInput: input}
 }
 
@@ -139,118 +173,191 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/":
 			m.filtering = true
 			m.filterInput.Focus()
+		case "ctrl+c":
+			return m, tea.Quit
 		}
 	}
 	return m, nil
 }
 
-func statusColor(status int) lipgloss.Color {
+func statusStyle(status int) lipgloss.Style {
 	switch {
 	case status >= 200 && status < 300:
-		return lipgloss.Color("42")
+		return lipgloss.NewStyle().Foreground(theme.status2xx).Bold(true)
 	case status >= 300 && status < 400:
-		return lipgloss.Color("33")
+		return lipgloss.NewStyle().Foreground(theme.status3xx).Bold(true)
 	case status >= 400 && status < 500:
-		return lipgloss.Color("220")
+		return lipgloss.NewStyle().Foreground(theme.status4xx).Bold(true)
 	case status >= 500:
-		return lipgloss.Color("196")
+		return lipgloss.NewStyle().Foreground(theme.status5xx).Bold(true)
 	default:
-		return lipgloss.Color("255")
+		return lipgloss.NewStyle().Foreground(theme.normal)
 	}
-}
-
-func wrapPath(path string, maxWidth int) []string {
-	if len(path) <= maxWidth {
-		return []string{path}
-	}
-	var lines []string
-	for len(path) > 0 {
-		if len(path) <= maxWidth {
-			lines = append(lines, path)
-			break
-		}
-		lines = append(lines, path[:maxWidth])
-		path = path[maxWidth:]
-	}
-	return lines
-}
-
-func (m Model) helpFooter() string {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	return style.Render("q:quit c:clear e:errors p:pause /:filter")
 }
 
 func (m Model) View() string {
 	if m.quitting {
 		if m.exportPrompt {
-			return "Export session log to file? (y/n)"
+			return m.renderExportPrompt()
 		}
-		return "Shutting down..."
+		return m.renderShutdown()
 	}
 
-	var b strings.Builder
-	status := lipgloss.NewStyle().Bold(true)
-	url := lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
-	stateText := "disconnected"
+	// Calculate available space
+	headerHeight := 5
+	footerHeight := 1
+	tableHeaderHeight := 2
+	availableHeight := m.height - headerHeight - footerHeight - tableHeaderHeight
+	if availableHeight < 3 {
+		availableHeight = 3
+	}
+
+	var sections []string
+	sections = append(sections, m.renderHeader())
+	sections = append(sections, m.renderTableHeader())
+	sections = append(sections, m.renderLogs(availableHeight))
+	sections = append(sections, m.renderFooter())
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+func (m Model) renderHeader() string {
+	width := m.width
+	if width < 80 {
+		width = 80
+	}
+
+	// Status bar at top
+	statusBarStyle := lipgloss.NewStyle().
+		Background(theme.headerBg).
+		Foreground(theme.headerFg).
+		Padding(0, 1).
+		Width(width)
+
+	// Connection status
+	statusText := "●"
+	statusStyle := lipgloss.NewStyle().Foreground(theme.error).Bold(true)
 	if m.connected {
-		stateText = "connected"
+		statusText = "●"
+		statusStyle = lipgloss.NewStyle().Foreground(theme.success).Bold(true)
 	}
-	statusLine := fmt.Sprintf("remo %s | %s | attempt %d", m.subdomain, stateText, m.attempt)
+
+	// Build status line
+	var statusParts []string
+	statusParts = append(statusParts, statusStyle.Render(statusText))
+	statusParts = append(statusParts, lipgloss.NewStyle().Bold(true).Render(m.subdomain))
+
+	if m.connected {
+		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(theme.success).Render("connected"))
+	} else {
+		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(theme.error).Render("disconnected"))
+	}
+
+	if m.attempt > 0 {
+		statusParts = append(statusParts, fmt.Sprintf("attempt %d", m.attempt))
+	}
 	if !m.connected && m.backoff > 0 {
-		statusLine += fmt.Sprintf(" | next retry in %s", formatDuration(m.backoff))
+		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(theme.warning).Render(fmt.Sprintf("retry in %s", formatDuration(m.backoff))))
 	}
+
+	// Error indicator
 	if m.lastError != "" {
-		statusLine += fmt.Sprintf(" | last error: %s", m.lastError)
+		errText := truncate(m.lastError, 50)
+		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(theme.error).Render("⚠ "+errText))
 	}
-	if m.showErrorsOnly {
-		statusLine += " | errors only"
-	}
-	statusLine += fmt.Sprintf(" | req %d err %d bytes %d/%d avg %.1fms", m.stats.RequestCount, m.stats.ErrorCount, m.stats.BytesIn, m.stats.BytesOut, m.stats.avgLatency())
-	b.WriteString(status.Render(statusLine))
-	if m.paused {
-		pausedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-		b.WriteString(" " + pausedStyle.Render("[PAUSED]"))
-	}
-	b.WriteString("\n")
+
+	// URL line
+	var urlLine string
 	if m.url != "" {
-		b.WriteString(url.Render("→ " + m.url + "\n"))
+		urlLine = lipgloss.NewStyle().
+			Foreground(theme.success).
+			Bold(true).
+			Render("→ " + m.url)
 	}
-	b.WriteString(m.statsLine())
-	b.WriteString("\n")
-	b.WriteString("Recent requests\n")
+
+	// Stats line
+	avgLatency := time.Duration(0)
+	if m.stats.RequestCount > 0 {
+		avgLatency = m.stats.TotalLatency / time.Duration(m.stats.RequestCount)
+	}
+
+	statsStyle := lipgloss.NewStyle().Foreground(theme.muted)
+	statsLine := fmt.Sprintf("Requests: %d | Errors: %d | Bytes In: %s | Bytes Out: %s | Latency: %s",
+		m.stats.RequestCount,
+		m.stats.ErrorCount,
+		formatBytes(m.stats.BytesIn),
+		formatBytes(m.stats.BytesOut),
+		formatDuration(avgLatency),
+	)
+
+	// Filter indicator
+	var filterLine string
 	if m.filter != "" {
-		b.WriteString(fmt.Sprintf("filter: %s\n", m.filter))
+		filterLine = lipgloss.NewStyle().
+			Foreground(theme.selected).
+			Render(fmt.Sprintf("Filter: %s", m.filter))
 	}
 	if m.filtering {
-		b.WriteString(m.filterInput.View())
-		b.WriteString("\n")
+		filterLine = m.filterInput.View()
 	}
+
+	// Combine all header lines
+	var lines []string
+	lines = append(lines, statusBarStyle.Render(strings.Join(statusParts, " | ")))
+	if urlLine != "" {
+		lines = append(lines, urlLine)
+	}
+	lines = append(lines, statsStyle.Render(statsLine))
+	if filterLine != "" {
+		lines = append(lines, filterLine)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderTableHeader() string {
+	cols := []struct {
+		name  string
+		width int
+	}{
+		{"Time", 8},
+		{"Method", 6},
+		{"Path", 30},
+		{"Status", 6},
+		{"Latency", 8},
+		{"Remote", 15},
+	}
+
+	var parts []string
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.headerFg).Background(theme.headerBg)
+
+	for _, col := range cols {
+		parts = append(parts, headerStyle.Width(col.width).Render(col.name))
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Left, parts...)
+}
+
+func (m Model) renderLogs(maxLines int) string {
 	if len(m.logs) == 0 {
 		if m.paused {
-			pauseStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Italic(true)
-			b.WriteString(pauseStyle.Render("  -- Polling paused, press 'p' to resume --\n"))
-		} else {
-			b.WriteString("  waiting for traffic...\n")
+			return lipgloss.NewStyle().
+				Foreground(theme.muted).
+				Italic(true).
+				Render("  -- Paused (press 'p' to resume) --")
 		}
-		b.WriteString("\n")
-		b.WriteString(m.helpFooter())
-		return b.String()
+		return lipgloss.NewStyle().
+			Foreground(theme.muted).
+			Italic(true).
+			Render("  -- Waiting for traffic... --")
 	}
 
-	headerLines := 4
-	footerLines := 1
-	filterLine := 0
-	if m.filter != "" {
-		filterLine = 1
-	}
-	availableLines := m.height - headerLines - footerLines - filterLine
-	if availableLines < 5 {
-		availableLines = 5
-	}
-
+	var lines []string
 	count := 0
-	for i := len(m.logs) - 1; i >= 0 && count < availableLines; i-- {
+
+	for i := len(m.logs) - 1; i >= 0 && count < maxLines; i-- {
 		entry := m.logs[i]
+
 		if m.showErrorsOnly && entry.Status < 400 {
 			continue
 		}
@@ -258,26 +365,85 @@ func (m Model) View() string {
 			continue
 		}
 
-		statusStyle := lipgloss.NewStyle().Foreground(statusColor(entry.Status)).Bold(true)
-		lines := wrapPath(entry.Path, 40)
-		for j, line := range lines {
-			if j == 0 {
-				b.WriteString(fmt.Sprintf("  %s | %-4s %-40s %s | %s\n",
-					entry.Time.Format("15:04:05"),
-					entry.Method,
-					line,
-					statusStyle.Render(fmt.Sprintf("%3d", entry.Status)),
-					formatDuration(entry.Latency)))
-			} else {
-				b.WriteString(fmt.Sprintf("  %s      %s\n", strings.Repeat(" ", 8), line))
-			}
-		}
+		line := m.renderLogEntry(entry)
+		lines = append(lines, line)
 		count++
 	}
-	b.WriteString("\n")
-	b.WriteString(m.helpFooter())
-	return b.String()
+
+	return strings.Join(lines, "\n")
 }
+
+func (m Model) renderLogEntry(entry RequestLogMsg) string {
+	cols := []struct {
+		content string
+		width   int
+		style   lipgloss.Style
+	}{
+		{entry.Time.Format("15:04:05"), 8, lipgloss.NewStyle().Foreground(theme.muted)},
+		{entry.Method, 6, lipgloss.NewStyle().Foreground(theme.normal).Bold(true)},
+		{truncate(entry.Path, 30), 30, lipgloss.NewStyle().Foreground(theme.normal)},
+		{fmt.Sprintf("%d", entry.Status), 6, statusStyle(entry.Status)},
+		{formatDuration(entry.Latency), 8, lipgloss.NewStyle().Foreground(theme.muted)},
+		{truncate(entry.Remote, 15), 15, lipgloss.NewStyle().Foreground(theme.muted)},
+	}
+
+	var parts []string
+	for _, col := range cols {
+		parts = append(parts, col.style.Width(col.width).Render(col.content))
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Left, parts...)
+}
+
+func (m Model) renderFooter() string {
+	width := m.width
+	if width < 80 {
+		width = 80
+	}
+
+	footerStyle := lipgloss.NewStyle().
+		Background(theme.headerBg).
+		Foreground(theme.headerFg).
+		Width(width)
+
+	var keys []string
+	keys = append(keys, "q:quit")
+	keys = append(keys, "p:pause")
+	keys = append(keys, "c:clear")
+	keys = append(keys, "e:errors")
+	keys = append(keys, "/:filter")
+
+	if m.paused {
+		keys = append(keys, lipgloss.NewStyle().Foreground(theme.warning).Render("PAUSED"))
+	}
+	if m.showErrorsOnly {
+		keys = append(keys, lipgloss.NewStyle().Foreground(theme.status4xx).Render("ERRORS ONLY"))
+	}
+
+	return footerStyle.Render("  " + strings.Join(keys, "  "))
+}
+
+func (m Model) renderExportPrompt() string {
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.selected).
+		Padding(2).
+		Width(50)
+
+	content := "Export session logs to file?\n\n"
+	content += lipgloss.NewStyle().Foreground(theme.muted).Render("(y) yes  (n) no")
+
+	return boxStyle.Render(content)
+}
+
+func (m Model) renderShutdown() string {
+	return lipgloss.NewStyle().
+		Foreground(theme.muted).
+		Italic(true).
+		Render("Shutting down...")
+}
+
+// Helper functions
 
 func truncate(input string, size int) string {
 	if size <= 0 || len(input) <= size {
@@ -291,7 +457,7 @@ func truncate(input string, size int) string {
 
 func formatDuration(d time.Duration) string {
 	if d <= 0 {
-		return "0s"
+		return "0ms"
 	}
 	if d < time.Millisecond {
 		return fmt.Sprintf("%dµs", d.Microseconds())
@@ -299,7 +465,20 @@ func formatDuration(d time.Duration) string {
 	if d < time.Second {
 		return fmt.Sprintf("%dms", d.Milliseconds())
 	}
-	return d.Truncate(100 * time.Millisecond).String()
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 type SessionStats struct {
@@ -325,23 +504,6 @@ func (s *SessionStats) avgLatency() float64 {
 		return 0
 	}
 	return float64(s.TotalLatency.Microseconds()) / float64(s.RequestCount) / 1000
-}
-
-func (m Model) statsLine() string {
-	avgLatency := time.Duration(0)
-	if m.stats.RequestCount > 0 {
-		avgLatency = m.stats.TotalLatency / time.Duration(m.stats.RequestCount)
-	}
-
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	statsText := fmt.Sprintf("req %d err %d bytes %d/%d avg %dms",
-		m.stats.RequestCount,
-		m.stats.ErrorCount,
-		m.stats.BytesIn,
-		m.stats.BytesOut,
-		avgLatency.Milliseconds(),
-	)
-	return style.Render(statsText)
 }
 
 func max(a, b int) int {
