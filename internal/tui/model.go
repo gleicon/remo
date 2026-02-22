@@ -131,6 +131,8 @@ type ConnectionEntry struct {
 	Status    string
 	Uptime    time.Duration
 	Port      int
+	CreatedAt time.Time
+	LastPing  time.Time
 }
 
 type StateMsg struct {
