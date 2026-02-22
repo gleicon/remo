@@ -55,22 +55,24 @@ type requestLogEntry struct {
 }
 
 type Client struct {
-	cfg            Config
-	log            zerolog.Logger
-	upstream       string
-	reconnectMin   time.Duration
-	reconnectMax   time.Duration
-	uiProgram      *tea.Program
-	uiOnce         sync.Once
-	ctx            context.Context
-	cancel         context.CancelFunc
-	sshCmd         *exec.Cmd
-	eventsClient   *http.Client
-	pollInterval   time.Duration
-	lastEventIndex int // Track which events we've already sent
-	exportedLogs   []requestLogEntry
-	logsMu         sync.RWMutex
-	quitResult     chan tui.QuitMsg
+	cfg               Config
+	log               zerolog.Logger
+	upstream          string
+	reconnectMin      time.Duration
+	reconnectMax      time.Duration
+	uiProgram         *tea.Program
+	uiOnce            sync.Once
+	ctx               context.Context
+	cancel            context.CancelFunc
+	sshCmd            *exec.Cmd
+	eventsClient      *http.Client
+	pollInterval      time.Duration
+	lastEventIndex    int // Track which events we've already sent
+	exportedLogs      []requestLogEntry
+	logsMu            sync.RWMutex
+	quitResult        chan tui.QuitMsg
+	connectionsTicker *time.Ticker
+	publicKeyBase64   string
 }
 
 func New(cfg Config) (*Client, error) {
@@ -277,6 +279,9 @@ func (c *Client) runSession(ctx context.Context) error {
 
 	// Start polling for request events
 	c.startEventPolling(ctx)
+
+	// Start polling for connections list
+	c.startConnectionsPolling(ctx)
 
 	if c.cfg.URL != "" {
 		c.log.Info().Str("url", c.cfg.URL).Str("subdomain", c.cfg.Subdomain).Int("port", remotePort).Msg("connected to server - tunnel ready")
@@ -552,6 +557,24 @@ func (c *Client) startEventPolling(ctx context.Context) {
 	}()
 }
 
+func (c *Client) startConnectionsPolling(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := c.pollConnections(); err != nil {
+					c.log.Debug().Err(err).Msg("connections poll failed")
+				}
+			}
+		}
+	}()
+}
+
 func (c *Client) pollAndForwardEvents() error {
 	// Fetch events from server through the tunnel
 	resp, err := c.eventsClient.Get("http://127.0.0.1:18080/events")
@@ -613,6 +636,56 @@ func (c *Client) pollAndForwardEvents() error {
 	}
 
 	c.lastEventIndex = len(events)
+	return nil
+}
+
+// pollConnections fetches the user's connections from the server
+func (c *Client) pollConnections() error {
+	publicKey := base64.StdEncoding.EncodeToString(c.cfg.Identity.Public)
+
+	req, err := http.NewRequest("GET", "http://127.0.0.1:18080/connections", nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-Remo-Publickey", publicKey)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("fetch connections: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("connections endpoint returned %d", resp.StatusCode)
+	}
+
+	var connections []struct {
+		Subdomain string    `json:"subdomain"`
+		Port      int       `json:"port"`
+		CreatedAt time.Time `json:"createdAt"`
+		LastPing  time.Time `json:"lastPing"`
+		Status    string    `json:"status"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&connections); err != nil {
+		return fmt.Errorf("decode connections: %w", err)
+	}
+
+	// Convert to TUI connection entries
+	tuiConnections := make([]tui.ConnectionEntry, 0, len(connections))
+	for _, conn := range connections {
+		tuiConnections = append(tuiConnections, tui.ConnectionEntry{
+			Subdomain: conn.Subdomain,
+			Port:      conn.Port,
+			Status:    conn.Status,
+			CreatedAt: conn.CreatedAt,
+			LastPing:  conn.LastPing,
+		})
+	}
+
+	// Send to TUI
+	c.sendUI(tui.ConnectionsMsg{Connections: tuiConnections})
 	return nil
 }
 
