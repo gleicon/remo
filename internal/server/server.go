@@ -584,6 +584,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	port, pubKey, ok := s.registry.get(subdomain)
 	if !ok {
 		s.log.Warn().Str("subdomain", subdomain).Msg("tunnel not found for subdomain")
+		// X-Remo-Error header is used for debugging; value is generic (no sensitive data)
 		w.Header().Set("X-Remo-Error", "no-tunnel")
 		http.Error(w, "tunnel not available", http.StatusNotFound)
 		return
@@ -601,6 +602,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		s.log.Error().Err(err).Str("subdomain", subdomain).Msg("proxy error")
 		s.metrics.Record(subdomain, 0, 0, time.Since(start), true)
+		// X-Remo-Error header is used for debugging; value is generic (no sensitive data)
 		w.Header().Set("X-Remo-Error", "no-upstream")
 		http.Error(w, "upstream unavailable", http.StatusNotFound)
 	}
