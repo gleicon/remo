@@ -44,6 +44,8 @@ func NewRootCommand(ctx context.Context) *cobra.Command {
 	cmd.AddCommand(newKeysCommand(r))
 	cmd.AddCommand(newReservationsCommand(r))
 	cmd.AddCommand(newStatusCommand(r))
+	cmd.AddCommand(newConnectionsCommand(r))
+	cmd.AddCommand(newKillCommand(r))
 	cmd.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Show version",
