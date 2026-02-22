@@ -49,6 +49,54 @@ type Config struct {
 	AllowRandom     bool
 }
 
+// rateLimiter provides simple IP-based rate limiting
+type rateLimiter struct {
+	attempts    map[string][]time.Time // IP -> []attempt timestamps
+	mu          sync.RWMutex
+	maxAttempts int
+	window      time.Duration
+}
+
+// newRateLimiter creates a rate limiter with specified max attempts and time window
+func newRateLimiter(maxAttempts int, window time.Duration) *rateLimiter {
+	return &rateLimiter{
+		attempts:    make(map[string][]time.Time),
+		maxAttempts: maxAttempts,
+		window:      window,
+	}
+}
+
+// check returns true if the IP is allowed to proceed, false if rate limited
+func (rl *rateLimiter) check(ip string) bool {
+	if rl == nil {
+		return true
+	}
+
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	// Filter out old attempts
+	var recent []time.Time
+	for _, t := range rl.attempts[ip] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+	rl.attempts[ip] = recent
+
+	// Check if under limit
+	if len(recent) >= rl.maxAttempts {
+		return false
+	}
+
+	// Record this attempt
+	rl.attempts[ip] = append(rl.attempts[ip], now)
+	return true
+}
+
 type Server struct {
 	cfg           Config
 	log           zerolog.Logger
@@ -60,6 +108,7 @@ type Server struct {
 	requestEvents []RequestEvent
 	eventsMu      sync.RWMutex
 	maxEvents     int
+	rateLimiter   *rateLimiter
 }
 
 // RequestEvent represents a captured HTTP request for TUI logging
@@ -96,6 +145,7 @@ func New(cfg Config) *Server {
 		metrics:       newMetrics(),
 		requestEvents: make([]RequestEvent, 0, 100),
 		maxEvents:     100,
+		rateLimiter:   newRateLimiter(5, time.Minute), // Max 5 attempts per minute per IP
 		httpClient: &http.Client{
 			Timeout: cfg.ReadTimeout,
 			Transport: &http.Transport{
@@ -448,6 +498,15 @@ func (s *Server) handleUnregister(w http.ResponseWriter, r *http.Request) {
 
 // handleAdminCleanup allows admin to manually clean up stale tunnels
 func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
+	// Check rate limit first (before secret validation to prevent brute force)
+	clientIP := s.peerAddress(r)
+	if !s.rateLimiter.check(clientIP) {
+		s.log.Warn().Str("ip", clientIP).Msg("rate limit exceeded for admin endpoint")
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
+		return
+	}
+
 	// Check admin secret
 	secret := r.Header.Get("X-Admin-Secret")
 	if secret != s.cfg.AdminSecret {
