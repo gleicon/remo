@@ -77,6 +77,14 @@ func makeStyles() styles {
 	}
 }
 
+// ViewType represents the current TUI view
+type ViewType int
+
+const (
+	ViewLogs ViewType = iota
+	ViewConnections
+)
+
 type Model struct {
 	subdomain      string
 	url            string
@@ -96,6 +104,17 @@ type Model struct {
 	quitting       bool
 	exportPrompt   bool
 	exportAnswer   string
+	currentView    ViewType
+	connections    []ConnectionEntry
+	connSelected   int
+}
+
+// ConnectionEntry represents a single connection in the connections view
+type ConnectionEntry struct {
+	Subdomain string
+	Status    string
+	Uptime    time.Duration
+	Port      int
 }
 
 type StateMsg struct {
@@ -125,12 +144,23 @@ type QuitMsg struct {
 	FilePath string
 }
 
+// ConnectionsMsg updates the connections list in the TUI
+type ConnectionsMsg struct {
+	Connections []ConnectionEntry
+}
+
 func NewModel(subdomain string) Model {
 	input := textinput.New()
 	input.Prompt = "/"
 	input.CharLimit = 64
 	input.Placeholder = "filter..."
-	return Model{subdomain: subdomain, filterInput: input}
+	return Model{
+		subdomain:    subdomain,
+		filterInput:  input,
+		currentView:  ViewLogs,
+		connections:  []ConnectionEntry{},
+		connSelected: 0,
+	}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -156,6 +186,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logs = m.logs[len(m.logs)-maxLogs:]
 			}
 			m.stats.apply(msg)
+		}
+	case ConnectionsMsg:
+		m.connections = msg.Connections
+		if m.connSelected >= len(m.connections) {
+			m.connSelected = max(0, len(m.connections)-1)
 		}
 	case QuitMsg:
 		m.quitting = true
@@ -217,6 +252,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			return m, tea.Quit
+		case "tab":
+			// Switch between Logs and Connections views
+			if m.currentView == ViewLogs {
+				m.currentView = ViewConnections
+			} else {
+				m.currentView = ViewLogs
+			}
+			m.connSelected = 0
+		case "shift+tab":
+			// Switch views in reverse
+			if m.currentView == ViewLogs {
+				m.currentView = ViewConnections
+			} else {
+				m.currentView = ViewLogs
+			}
+			m.connSelected = 0
+		case "up", "k":
+			if m.currentView == ViewConnections && m.connSelected > 0 {
+				m.connSelected--
+			}
+		case "down", "j":
+			if m.currentView == ViewConnections && m.connSelected < len(m.connections)-1 {
+				m.connSelected++
+			}
 		}
 	}
 	return m, nil
@@ -244,15 +303,27 @@ func (m Model) View() string {
 	// Header section
 	sections = append(sections, m.renderHeader(s, w))
 
-	// Table header
-	sections = append(sections, m.renderTableHeader(s, w))
+	// View-specific content
+	if m.currentView == ViewLogs {
+		// Table header
+		sections = append(sections, m.renderTableHeader(s, w))
 
-	// Table rows
-	availableHeight := m.height - 7 // header (3) + table header (1) + footer (1) + padding (2)
-	if availableHeight < 3 {
-		availableHeight = 3
+		// Table rows
+		availableHeight := m.height - 7 // header (3) + table header (1) + footer (1) + padding (2)
+		if availableHeight < 3 {
+			availableHeight = 3
+		}
+		sections = append(sections, m.renderTableRows(s, w, availableHeight))
+	} else {
+		// Connections view
+		sections = append(sections, m.renderConnectionsHeader(s, w))
+
+		availableHeight := m.height - 7
+		if availableHeight < 3 {
+			availableHeight = 3
+		}
+		sections = append(sections, m.renderConnectionsRows(s, w, availableHeight))
 	}
-	sections = append(sections, m.renderTableRows(s, w, availableHeight))
 
 	// Footer
 	sections = append(sections, m.renderFooter(s, w))
@@ -263,7 +334,7 @@ func (m Model) View() string {
 func (m Model) renderHeader(s styles, w int) string {
 	var lines []string
 
-	// Line 1: Status indicator, subdomain, connection state
+	// Line 1: Status indicator, subdomain, connection state, view indicator
 	statusDot := "●"
 	statusStyle := s.disconnected
 	statusText := "disconnected"
@@ -272,10 +343,16 @@ func (m Model) renderHeader(s styles, w int) string {
 		statusText = "connected"
 	}
 
-	line1 := fmt.Sprintf("%s %s | %s",
+	viewText := "Logs"
+	if m.currentView == ViewConnections {
+		viewText = "Connections"
+	}
+
+	line1 := fmt.Sprintf("%s %s | %s | View: %s",
 		statusStyle.Render(statusDot),
 		lipgloss.NewStyle().Bold(true).Render(m.subdomain),
-		statusStyle.Render(statusText))
+		statusStyle.Render(statusText),
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33")).Render(viewText))
 
 	if m.attempt > 0 {
 		line1 += fmt.Sprintf(" | attempt %d", m.attempt)
@@ -420,13 +497,97 @@ func (m Model) renderRow(s styles, entry RequestLogMsg, widths []int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Left, parts...)
 }
 
+func (m Model) renderConnectionsHeader(s styles, w int) string {
+	// Calculate column widths based on available width
+	colWidths := []int{15, 10, 12, 10, 12}
+	totalWidth := 0
+	for _, cw := range colWidths {
+		totalWidth += cw + 2 // +2 for padding
+	}
+
+	// Adjust columns if terminal is wider
+	if w > totalWidth {
+		colWidths[4] = w - (colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 10)
+	}
+
+	headers := []string{"Subdomain", "Status", "Uptime", "Port", "Action"}
+	var parts []string
+
+	for i, h := range headers {
+		parts = append(parts, s.tableHeader.Width(colWidths[i]).Render(h))
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Left, parts...)
+}
+
+func (m Model) renderConnectionsRows(s styles, w int, maxLines int) string {
+	if len(m.connections) == 0 {
+		return s.muted.Render("  -- No active connections --")
+	}
+
+	// Calculate column widths
+	colWidths := []int{15, 10, 12, 10, 12}
+	totalWidth := 0
+	for _, cw := range colWidths {
+		totalWidth += cw + 2
+	}
+	if w > totalWidth {
+		colWidths[4] = w - (colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 10)
+	}
+
+	var lines []string
+	count := 0
+
+	for i, conn := range m.connections {
+		if count >= maxLines {
+			break
+		}
+
+		// Status indicator
+		statusDot := "●"
+		statusStyle := s.connected
+		if conn.Status != "ON" {
+			statusStyle = s.disconnected
+		}
+
+		actionText := "press x to kill"
+		if i == m.connSelected {
+			actionText = "> " + actionText
+		}
+
+		row := lipgloss.JoinHorizontal(lipgloss.Left,
+			s.tableRow.Width(colWidths[0]).Render(conn.Subdomain),
+			s.tableRow.Width(colWidths[1]).Render(statusStyle.Render(statusDot+" "+conn.Status)),
+			s.tableRow.Width(colWidths[2]).Render(formatDuration(conn.Uptime)),
+			s.tableRow.Width(colWidths[3]).Render(fmt.Sprintf("%d", conn.Port)),
+			s.tableRow.Width(colWidths[4]).Render(actionText),
+		)
+
+		lines = append(lines, row)
+		count++
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 func (m Model) renderFooter(s styles, w int) string {
-	keys := []string{
-		"q:quit",
-		"p:pause",
-		"c:clear",
-		"e:errors",
-		"/:filter",
+	var keys []string
+	if m.currentView == ViewLogs {
+		keys = []string{
+			"tab:connections",
+			"q:quit",
+			"p:pause",
+			"c:clear",
+			"e:errors",
+			"/:filter",
+		}
+	} else {
+		keys = []string{
+			"tab:logs",
+			"↑/↓:navigate",
+			"x:kill",
+			"q:quit",
+		}
 	}
 
 	return s.footer.Width(w).Render("  " + strings.Join(keys, "   "))
