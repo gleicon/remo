@@ -6,18 +6,19 @@ import (
 	"time"
 )
 
-// tunnelEntry represents an active tunnel with health tracking
-type tunnelEntry struct {
-	port      int
-	pubKey    string
-	lastPing  time.Time
-	createdAt time.Time
+// TunnelEntry represents an active tunnel with health tracking
+type TunnelEntry struct {
+	Subdomain string
+	Port      int
+	PubKey    string
+	LastPing  time.Time
+	CreatedAt time.Time
 }
 
 // registry manages active tunnels with automatic cleanup
 type registry struct {
 	mu      sync.RWMutex
-	active  map[string]*tunnelEntry
+	active  map[string]*TunnelEntry
 	timeout time.Duration
 }
 
@@ -27,7 +28,7 @@ func newRegistry(timeout time.Duration) *registry {
 		timeout = 5 * time.Minute // Default 5 minute timeout
 	}
 	return &registry{
-		active:  make(map[string]*tunnelEntry),
+		active:  make(map[string]*TunnelEntry),
 		timeout: timeout,
 	}
 }
@@ -39,11 +40,12 @@ func (r *registry) register(subdomain string, port int, pubKey string) bool {
 	if _, exists := r.active[subdomain]; exists {
 		return false
 	}
-	r.active[subdomain] = &tunnelEntry{
-		port:      port,
-		pubKey:    pubKey,
-		lastPing:  time.Now(),
-		createdAt: time.Now(),
+	r.active[subdomain] = &TunnelEntry{
+		Subdomain: subdomain,
+		Port:      port,
+		PubKey:    pubKey,
+		LastPing:  time.Now(),
+		CreatedAt: time.Now(),
 	}
 	return true
 }
@@ -63,7 +65,7 @@ func (r *registry) ping(subdomain string) bool {
 	if !ok {
 		return false
 	}
-	entry.lastPing = time.Now()
+	entry.LastPing = time.Now()
 	return true
 }
 
@@ -75,7 +77,7 @@ func (r *registry) get(subdomain string) (port int, pubKey string, exists bool) 
 	if !ok {
 		return 0, "", false
 	}
-	return entry.port, entry.pubKey, true
+	return entry.Port, entry.PubKey, true
 }
 
 // has checks if a tunnel exists
@@ -105,7 +107,7 @@ func (r *registry) listStale() []string {
 	now := time.Now()
 	var stale []string
 	for subdomain, entry := range r.active {
-		if now.Sub(entry.lastPing) > r.timeout {
+		if now.Sub(entry.LastPing) > r.timeout {
 			stale = append(stale, subdomain)
 		}
 	}
@@ -130,9 +132,23 @@ func (r *registry) getStats() (total int, stale int) {
 	now := time.Now()
 	total = len(r.active)
 	for _, entry := range r.active {
-		if now.Sub(entry.lastPing) > r.timeout {
+		if now.Sub(entry.LastPing) > r.timeout {
 			stale++
 		}
 	}
 	return total, stale
+}
+
+// listByPubKey returns all tunnels belonging to a specific public key
+func (r *registry) listByPubKey(pubKey string) []TunnelEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []TunnelEntry
+	for _, entry := range r.active {
+		if entry.PubKey == pubKey {
+			result = append(result, *entry)
+		}
+	}
+	return result
 }

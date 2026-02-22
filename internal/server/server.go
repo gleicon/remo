@@ -129,6 +129,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/events", s.handleEvents)
+	mux.HandleFunc("/connections", s.handleConnections)
 	mux.HandleFunc("/admin/cleanup", s.handleAdminCleanup)
 	mux.HandleFunc("/", s.handleProxy)
 	return mux
@@ -336,6 +337,69 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		"status":    "ok",
 		"subdomain": subdomain,
 	})
+}
+
+// handleConnections returns all tunnels belonging to the requesting user
+func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract public key from header
+	authorizedKey := r.Header.Get("X-Remo-Publickey")
+	if authorizedKey == "" {
+		http.Error(w, "missing X-Remo-Publickey header", http.StatusBadRequest)
+		return
+	}
+
+	// Only allow access through tunnel (localhost)
+	remoteAddr := s.peerAddress(r)
+	isLocalhost := remoteAddr == "127.0.0.1" || remoteAddr == "::1" || remoteAddr == "localhost"
+	if !isLocalhost {
+		http.Error(w, "unauthorized", http.StatusForbidden)
+		return
+	}
+
+	// Get tunnels for this public key
+	tunnels := s.registry.listByPubKey(authorizedKey)
+
+	now := time.Now()
+	timeout := s.cfg.TunnelTimeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+
+	// Build response with status information
+	type connectionInfo struct {
+		Subdomain string    `json:"subdomain"`
+		Port      int       `json:"port"`
+		CreatedAt time.Time `json:"createdAt"`
+		LastPing  time.Time `json:"lastPing"`
+		Status    string    `json:"status"`
+	}
+
+	result := make([]connectionInfo, 0, len(tunnels))
+	for _, entry := range tunnels {
+		status := "active"
+		if now.Sub(entry.LastPing) > timeout {
+			status = "stale"
+		}
+
+		result = append(result, connectionInfo{
+			Subdomain: entry.Subdomain,
+			Port:      entry.Port,
+			CreatedAt: entry.CreatedAt,
+			LastPing:  entry.LastPing,
+			Status:    status,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		s.log.Error().Err(err).Msg("failed to encode connections response")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
 }
 
 // handleUnregister allows clients to explicitly unregister on shutdown
