@@ -743,6 +743,29 @@ func (s *Server) trustedProxy(r *http.Request) bool {
 }
 
 func (s *Server) peerAddress(r *http.Request) string {
+	// Check if request comes from trusted proxy
+	if s.trustedProxy(r) {
+		// Extract real client IP from X-Forwarded-For header
+		xff := r.Header.Get("X-Forwarded-For")
+		if xff != "" {
+			// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+			// The first IP is the original client
+			parts := strings.Split(xff, ",")
+			if len(parts) > 0 {
+				clientIP := strings.TrimSpace(parts[0])
+				if clientIP != "" {
+					return clientIP
+				}
+			}
+		}
+		// Fallback to X-Real-Ip if X-Forwarded-For is empty
+		xri := r.Header.Get("X-Real-Ip")
+		if xri != "" {
+			return strings.TrimSpace(xri)
+		}
+	}
+
+	// Return direct remote address
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
 		return host

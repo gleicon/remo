@@ -507,8 +507,8 @@ func (m Model) renderTableRows(s styles, w int, maxLines int) string {
 		return s.muted.Render("  -- Waiting for traffic... --")
 	}
 
-	// Calculate column widths
-	colWidths := []int{10, 8, 35, 8, 10, 15}
+	// Calculate column widths - Remote column increased to 18 for IPv6 support
+	colWidths := []int{10, 8, 35, 8, 10, 18}
 	totalWidth := 0
 	for _, cw := range colWidths {
 		totalWidth += cw + 2
