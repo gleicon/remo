@@ -181,9 +181,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.exportAnswer = "y"
 				m.exportPrompt = false
 				return m, func() tea.Msg { return QuitMsg{Export: true} }
-			case "n", "N", "esc":
+			case "n", "N":
 				m.exportPrompt = false
 				return m, func() tea.Msg { return QuitMsg{Export: false} }
+			case "esc", "ctrl+c":
+				// Cancel export and quit immediately
+				m.exportPrompt = false
+				return m, tea.Quit
 			}
 			return m, nil
 		}
@@ -206,6 +210,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filtering = true
 			m.filterInput.Focus()
 		case "ctrl+c":
+			// If export prompt is showing, cancel it
+			if m.exportPrompt {
+				m.exportPrompt = false
+				m.quitting = false
+				return m, tea.Quit
+			}
 			return m, tea.Quit
 		}
 	}
