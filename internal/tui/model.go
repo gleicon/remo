@@ -27,6 +27,7 @@ type styles struct {
 	connected    lipgloss.Style
 	disconnected lipgloss.Style
 	error        lipgloss.Style
+	errorBanner  lipgloss.Style
 	muted        lipgloss.Style
 }
 
@@ -72,6 +73,11 @@ func makeStyles() styles {
 			Bold(true),
 		error: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")),
+		errorBanner: lipgloss.NewStyle().
+			Background(lipgloss.Color("196")).
+			Foreground(lipgloss.Color("15")).
+			Bold(true).
+			Padding(0, 1),
 		muted: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")),
 	}
@@ -107,6 +113,16 @@ type Model struct {
 	currentView    ViewType
 	connections    []ConnectionEntry
 	connSelected   int
+	errorBanner    *ErrorBanner
+}
+
+// ErrorBanner displays inline error messages in the TUI
+type ErrorBanner struct {
+	Type       string // "no-upstream", "no-tunnel"
+	Message    string
+	Subdomain  string
+	Time       time.Time
+	StatusCode int
 }
 
 // ConnectionEntry represents a single connection in the connections view
@@ -147,6 +163,14 @@ type QuitMsg struct {
 // ConnectionsMsg updates the connections list in the TUI
 type ConnectionsMsg struct {
 	Connections []ConnectionEntry
+}
+
+// ErrorMsg displays an error banner in the TUI
+type ErrorMsg struct {
+	Type       string // "no-upstream", "no-tunnel"
+	Message    string
+	Subdomain  string
+	StatusCode int
 }
 
 func NewModel(subdomain string) Model {
@@ -192,10 +216,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.connSelected >= len(m.connections) {
 			m.connSelected = max(0, len(m.connections)-1)
 		}
+	case ErrorMsg:
+		m.errorBanner = &ErrorBanner{
+			Type:       msg.Type,
+			Message:    msg.Message,
+			Subdomain:  msg.Subdomain,
+			Time:       time.Now(),
+			StatusCode: msg.StatusCode,
+		}
 	case QuitMsg:
 		m.quitting = true
 		return m, tea.Quit
 	case tea.KeyMsg:
+		// Dismiss error banner on any key press
+		if m.errorBanner != nil {
+			m.errorBanner = nil
+			return m, nil
+		}
 		if m.filtering {
 			var cmd tea.Cmd
 			m.filterInput, cmd = m.filterInput.Update(msg)
@@ -303,6 +340,11 @@ func (m Model) View() string {
 	// Header section
 	sections = append(sections, m.renderHeader(s, w))
 
+	// Error banner (if present)
+	if m.errorBanner != nil {
+		sections = append(sections, m.renderErrorBanner(s, w))
+	}
+
 	// View-specific content
 	if m.currentView == ViewLogs {
 		// Table header
@@ -329,6 +371,30 @@ func (m Model) View() string {
 	sections = append(sections, m.renderFooter(s, w))
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+func (m Model) renderErrorBanner(s styles, w int) string {
+	if m.errorBanner == nil {
+		return ""
+	}
+
+	errType := m.errorBanner.Type
+	if errType == "" {
+		errType = "error"
+	}
+
+	message := fmt.Sprintf("⚠ %s: %s (%d)",
+		errType,
+		m.errorBanner.Message,
+		m.errorBanner.StatusCode)
+
+	if m.errorBanner.Subdomain != "" {
+		message += fmt.Sprintf(" | Subdomain: %s", m.errorBanner.Subdomain)
+	}
+
+	message += fmt.Sprintf(" | %s | Press any key", m.errorBanner.Time.Format("15:04:05"))
+
+	return s.errorBanner.Width(w).Render(message)
 }
 
 func (m Model) renderHeader(s styles, w int) string {
