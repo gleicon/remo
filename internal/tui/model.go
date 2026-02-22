@@ -26,6 +26,7 @@ type styles struct {
 	status5xx    lipgloss.Style
 	connected    lipgloss.Style
 	disconnected lipgloss.Style
+	stale        lipgloss.Style
 	error        lipgloss.Style
 	errorBanner  lipgloss.Style
 	muted        lipgloss.Style
@@ -70,6 +71,9 @@ func makeStyles() styles {
 			Bold(true),
 		disconnected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")).
+			Bold(true),
+		stale: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("220")).
 			Bold(true),
 		error: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")),
@@ -567,18 +571,18 @@ func (m Model) renderRow(s styles, entry RequestLogMsg, widths []int) string {
 
 func (m Model) renderConnectionsHeader(s styles, w int) string {
 	// Calculate column widths based on available width
-	colWidths := []int{15, 10, 12, 10, 12}
+	colWidths := []int{15, 12, 12, 10, 15, 15}
 	totalWidth := 0
 	for _, cw := range colWidths {
 		totalWidth += cw + 2 // +2 for padding
 	}
 
-	// Adjust columns if terminal is wider
+	// Adjust action column if terminal is wider
 	if w > totalWidth {
-		colWidths[4] = w - (colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 10)
+		colWidths[5] = w - (colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 12)
 	}
 
-	headers := []string{"Subdomain", "Status", "Uptime", "Port", "Action"}
+	headers := []string{"Subdomain", "Status", "Uptime", "Port", "Last Ping", "Action"}
 	var parts []string
 
 	for i, h := range headers {
@@ -594,13 +598,13 @@ func (m Model) renderConnectionsRows(s styles, w int, maxLines int) string {
 	}
 
 	// Calculate column widths
-	colWidths := []int{15, 10, 12, 10, 12}
+	colWidths := []int{15, 12, 12, 10, 15, 15}
 	totalWidth := 0
 	for _, cw := range colWidths {
 		totalWidth += cw + 2
 	}
 	if w > totalWidth {
-		colWidths[4] = w - (colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 10)
+		colWidths[5] = w - (colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 12)
 	}
 
 	var lines []string
@@ -611,11 +615,46 @@ func (m Model) renderConnectionsRows(s styles, w int, maxLines int) string {
 			break
 		}
 
-		// Status indicator
+		// Status indicator with appropriate color
 		statusDot := "●"
 		statusStyle := s.connected
-		if conn.Status != "ON" {
+		statusText := conn.Status
+
+		switch conn.Status {
+		case "active":
+			statusStyle = s.connected
+			statusText = "active"
+		case "stale":
+			statusStyle = s.stale
+			statusText = "stale"
+		case "stopped", "disconnected":
 			statusStyle = s.disconnected
+			statusText = conn.Status
+		default:
+			// Fallback for legacy "ON" status
+			if conn.Status == "ON" || conn.Status == "" {
+				statusStyle = s.connected
+				statusText = "active"
+			}
+		}
+
+		// Calculate uptime from CreatedAt
+		uptime := conn.Uptime
+		if uptime == 0 && !conn.CreatedAt.IsZero() {
+			uptime = time.Since(conn.CreatedAt)
+		}
+
+		// Format last ping time
+		lastPingText := "never"
+		if !conn.LastPing.IsZero() {
+			sincePing := time.Since(conn.LastPing)
+			if sincePing < time.Minute {
+				lastPingText = fmt.Sprintf("%ds ago", int(sincePing.Seconds()))
+			} else if sincePing < time.Hour {
+				lastPingText = fmt.Sprintf("%dm ago", int(sincePing.Minutes()))
+			} else {
+				lastPingText = fmt.Sprintf("%dh ago", int(sincePing.Hours()))
+			}
 		}
 
 		actionText := "press x to kill"
@@ -625,10 +664,11 @@ func (m Model) renderConnectionsRows(s styles, w int, maxLines int) string {
 
 		row := lipgloss.JoinHorizontal(lipgloss.Left,
 			s.tableRow.Width(colWidths[0]).Render(conn.Subdomain),
-			s.tableRow.Width(colWidths[1]).Render(statusStyle.Render(statusDot+" "+conn.Status)),
-			s.tableRow.Width(colWidths[2]).Render(formatDuration(conn.Uptime)),
+			s.tableRow.Width(colWidths[1]).Render(statusStyle.Render(statusDot+" "+statusText)),
+			s.tableRow.Width(colWidths[2]).Render(formatDuration(uptime)),
 			s.tableRow.Width(colWidths[3]).Render(fmt.Sprintf("%d", conn.Port)),
-			s.tableRow.Width(colWidths[4]).Render(actionText),
+			s.tableRow.Width(colWidths[4]).Render(lastPingText),
+			s.tableRow.Width(colWidths[5]).Render(actionText),
 		)
 
 		lines = append(lines, row)
