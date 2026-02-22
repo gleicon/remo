@@ -73,8 +73,8 @@ func TestProxyNoTunnel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Host = "foo.rempapps.site"
 	srv.handleProxy(rec, req)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("expected 502, got %d", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 (no tunnel), got %d", rec.Code)
 	}
 }
 
@@ -376,7 +376,7 @@ func TestProxyWithSubdomainPrefix(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Host = "foo.apps.rempapps.site"
 	srv.handleProxy(rec, req)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("expected 502 (no tunnel), got %d", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 (no tunnel), got %d", rec.Code)
 	}
 }
