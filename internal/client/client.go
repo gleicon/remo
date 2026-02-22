@@ -106,7 +106,8 @@ func New(cfg Config) (*Client, error) {
 	}
 	if cfg.EnableTUI {
 		model := tui.NewModel(cfg.Subdomain)
-		client.uiProgram = tea.NewProgram(model, tea.WithoutSignalHandler())
+		// Use WithContext so TUI can be cancelled via context
+		client.uiProgram = tea.NewProgram(model, tea.WithContext(ctx))
 	}
 	return client, nil
 }
@@ -296,8 +297,20 @@ func (c *Client) runSession(ctx context.Context) error {
 		return err
 	case <-ctx.Done():
 		cancelPing()
-		cmd.Process.Kill()
-		cmd.Wait()
+		// Kill SSH process with timeout
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+			// Wait up to 2 seconds for process to exit
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			select {
+			case <-done:
+				// Process exited
+			case <-time.After(2 * time.Second):
+				// Timeout, force kill
+				c.log.Warn().Msg("SSH process did not exit gracefully, forcing")
+			}
+		}
 		return ctx.Err()
 	}
 }
@@ -442,6 +455,14 @@ func (c *Client) startUI() {
 				c.quitResult <- quitMsg
 			} else {
 				c.quitResult <- tui.QuitMsg{Export: false}
+			}
+		}()
+
+		// Watch for context cancellation and quit TUI
+		go func() {
+			<-c.ctx.Done()
+			if c.uiProgram != nil {
+				c.uiProgram.Quit()
 			}
 		}()
 	})
@@ -599,9 +620,9 @@ func (c *Client) pollAndForwardEvents() error {
 func (c *Client) healthCheckLoop(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second) // Ping every 30 seconds
 	defer ticker.Stop()
-	
+
 	publicKeyBase64 := base64.StdEncoding.EncodeToString(c.cfg.Identity.Public)
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -617,24 +638,24 @@ func (c *Client) healthCheckLoop(ctx context.Context) {
 // sendHealthPing sends a single health check ping to the server
 func (c *Client) sendHealthPing(publicKey string) error {
 	url := fmt.Sprintf("http://127.0.0.1:18080/ping?subdomain=%s", c.cfg.Subdomain)
-	
+
 	req, err := http.NewRequest("POST", url, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("X-Remo-Publickey", publicKey)
-	
+
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("ping failed with status %d", resp.StatusCode)
 	}
-	
+
 	c.log.Debug().Str("subdomain", c.cfg.Subdomain).Msg("health ping sent")
 	return nil
 }
