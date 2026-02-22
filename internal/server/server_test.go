@@ -126,7 +126,7 @@ func TestAuthorizeAdminNoBearer(t *testing.T) {
 }
 
 func TestRegistryOperations(t *testing.T) {
-	reg := newRegistry()
+	reg := newRegistry(5 * time.Minute)
 	if !reg.register("foo", 8080, "testkey") {
 		t.Fatal("register should succeed")
 	}
@@ -158,7 +158,7 @@ func TestRegistryOperations(t *testing.T) {
 }
 
 func TestRegistryListSorted(t *testing.T) {
-	reg := newRegistry()
+	reg := newRegistry(5 * time.Minute)
 	reg.register("zebra", 8080, "key1")
 	reg.register("alpha", 8081, "key2")
 	reg.register("mid", 8082, "key3")
