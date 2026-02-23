@@ -3,9 +3,9 @@
 [![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8.svg)](https://golang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Self-hosted reverse tunnel with SSH and TUI dashboard**
+**Self-hosted reverse tunnel with SSH and full-screen TUI dashboard**
 
-Expose local services through public `*.yourdomain.tld` subdomains using standard SSH. No custom protocols, no complex configuration—just a single binary.
+Expose local services through public `*.yourdomain.tld` subdomains using standard SSH. No custom protocols, no complex configuration—just a single binary with htop-style interface.
 
 ---
 
@@ -16,545 +16,362 @@ Remo is a lightweight reverse tunnel solution that lets you expose local develop
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              INTERNET                                       │
-│                                                                             │
-│   User Request: https://myapp.yourdomain.tld/api/users                      │
-│           │                                                                 │
-│           ▼                                                                 │
-│   ┌───────────────┐                                                         │
-│   │   DNS         │                                                         │
-│   │   (A record:  │                                                         │
-│   │   *.domain →  │                                                         │
-│   │   server IP)  │                                                         │
-│   └───────┬───────┘                                                         │
-│           │                                                                 │
-│           ▼                                                                 │
-│   ┌───────────────┐     ┌───────────────┐     ┌─────────────────────────┐   │
-│   │   Nginx       │────▶│   Remo        │────▶│   SSH Tunnel            │   │
-│   │   (SSL/       │     │   Server      │     │   (Port Forward)        │   │
-│   │   Reverse     │     │   (Port 18080)│     │                         │   │
-│   │   Proxy)      │     │               │     │   ┌─────────────────┐   │   │
-│   │               │     │   Routes by   │     │   │   Local Service │   │   │
-│   │   Port 443    │     │   subdomain   │     │   │   (your app)    │   │   │
-│   └───────────────┘     └───────────────┘     │   │   Port 3000     │   │   │
-│                                               │   └─────────────────┘   │   │
-│                                               │          ▲              │   │
-│                                               │          │              │   │
-│                                               │   ┌──────┴──────┐       │   │
-│                                               │   │  Remo       │       │   │
-│                                               │   │  Client     │       │   │
-│                                               │   │  (laptop)   │       │   │
-│                                               │   └─────────────┘       │   │
-│                                               └─────────────────────────┘   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-Data Flow:
-  HTTP Request → Nginx (SSL) → Remo Server → SSH Tunnel → Your Local Service
-  Response     ← Nginx ← Remo Server ← SSH Tunnel ← Your Local Service
+Internet → Nginx (443/SSL) → Remo Server (18080) → SSH Tunnel → Your Local Service
 ```
 
-### Key Features
-
-- **Wildcard Subdomain Routing** — Automatically route `*.yourdomain.tld` to different local services
-- **SSH-Based Security** — Uses standard SSH key authentication (Ed25519/RSA), no custom protocols
-- **Real-Time TUI Dashboard** — Watch requests flow through your tunnels with live filtering and statistics
-- **Single Binary** — One executable, no dependencies, minimal resource usage
-- **Production Ready** — Nginx SSL termination, systemd service, Prometheus metrics
+**Key Components:**
+- **Client** — Runs on your laptop, creates SSH reverse tunnel
+- **Server** — Runs on your VPS, routes by subdomain, tracks tunnel health
+- **Nginx** — Optional SSL termination and reverse proxy
 
 ---
 
 ## Quick Start
 
-### Install Server (on your VPS)
+### 1. Install Server (on Ubuntu VPS)
 
 ```bash
-# Run as root on your Ubuntu VPS
+# Run as root
+sudo curl -sL https://raw.githubusercontent.com/gleicon/remo/main/install.sh | bash
+```
+
+**Interactive prompts:**
+- Domain: `yourdomain.com`
+- Behind nginx: `Y` (recommended)
+- Client SSH keys: paste your `ssh-ed25519 AAAAC3...` key
+
+### 2. Install Client (on your laptop)
+
+```bash
+# Run as regular user
 curl -sL https://raw.githubusercontent.com/gleicon/remo/main/install.sh | bash
 ```
 
-The installer will ask for:
-- Domain name (e.g., `remo.example.com`)
-- Behind nginx proxy? (Y/n)
-- Client SSH public keys (interactive)
+**Interactive prompts:**
+- Server domain: `yourdomain.com`
+- SSH key: `~/.ssh/id_ed25519` (or generate new)
 
-Then starts the systemd service automatically.
-
-### Install Client (on your laptop)
+### 3. Connect with TUI
 
 ```bash
-# Run on your local machine
-curl -sL https://raw.githubusercontent.com/gleicon/remo/main/install.sh | bash
+remo connect --server yourdomain.com --subdomain myapp \
+  --upstream http://127.0.0.1:3000 --tui
 ```
 
-The installer will ask for:
-- Server domain
-- SSH key path (default: ~/.ssh/id_rsa)
-- Test connection?
-
-### Connect
-
-```bash
-remo connect --server yourdomain.com --subdomain myapp --upstream http://127.0.0.1:3000 --tui
-```
-
-Your service is now available at: **`https://myapp.yourdomain.com`**
-
----
-
-## How It Works
-
-1. **SSH Connection** — Client connects to server via SSH (port 22) using your SSH key
-2. **Reverse Tunnel** — Client opens a reverse tunnel, listening on a local port on the server
-3. **Subdomain Registration** — Client registers a subdomain via HTTP through the SSH tunnel
-4. **Request Routing** — Server proxies incoming HTTP requests to the appropriate tunnel port
-5. **Local Forwarding** — SSH tunnel forwards requests to your local upstream service
-
-### TUI Dashboard Features
-
-The TUI provides real-time visibility into your tunnels:
-
-- **Live Request Log** — See every HTTP request as it happens
-- **Session Statistics** — Track requests, errors, bytes transferred, and latency
-- **Filtering** — Filter by text or show only error responses
-- **JSON Export** — Export request logs when quitting for later analysis
-
----
-
-## Production Setup with Nginx
-
-For production deployments, we recommend using nginx as a reverse proxy with SSL termination:
-
-**Why nginx?**
-- SSL/TLS termination with Let's Encrypt
-- WebSocket support for real-time features
-- Better performance and connection handling
-- Standard security headers and best practices
-
-**Quick certbot example:**
-```bash
-# Obtain wildcard certificate
-sudo certbot certonly --manual --preferred-challenges dns \
-  -d "*.yourdomain.tld" -d "yourdomain.tld"
-
-# Auto-renewal test
-sudo certbot renew --dry-run
-```
-
-**Documentation:**
-- [docs/nginx.md](docs/nginx.md) — Complete nginx and Let's Encrypt setup guide
-- [docs/nginx-example.conf](docs/nginx-example.conf) — Production-ready nginx configuration
-
----
-
-## SSH Key Authentication
-
-Remo uses SSH public key authentication for secure, passwordless connections.
-
-### Quick Setup
-
-**Generate Ed25519 key pair (client):**
-```bash
-ssh-keygen -t ed25519 -C "remo-$(whoami)@$(hostname)" -f ~/.ssh/remo_ed25519
-```
-
-**Add to authorized keys (server):**
-```bash
-# As remo user on server
-echo "ssh-ed25519 AAAAC3NzaC1... your-comment *" >> ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-```
-
-**Subdomain rules:**
-- `*` — Allow any subdomain
-- `dev-*` — Allow subdomains starting with "dev-"
-- `staging` — Allow only exact subdomain "staging"
-
-**Full guide:** [docs/ssh-setup.md](docs/ssh-setup.md)
+Your service is now live at: **`https://myapp.yourdomain.com`**
 
 ---
 
 ## TUI Dashboard
 
-The Terminal User Interface provides real-time monitoring of your tunnels.
+The full-screen Terminal User Interface provides real-time monitoring with htop-style layout.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ Remo TUI Dashboard                                    [RUNNING] │
-├─────────────────────────────────────────────────────────────────┤
-│ Requests: 1,234  │  Errors: 12  │  Bytes: 45.2 MB  │  Avg: 23ms│
-├─────────────────────────────────────────────────────────────────┤
-│ Time     Status  Method  Path                        Duration   │
-│ 14:32:01 200     GET     /api/users                   15ms      │
-│ 14:32:05 201     POST    /api/users                   45ms      │
-│ 14:32:08 404     GET     /api/unknown                 5ms       │
-│ 14:32:12 500     GET     /api/error                   120ms     │
-├─────────────────────────────────────────────────────────────────┤
-│ [q]uit  [c]lear  [e]rrors-only  [p]ause  [f]ilter               │
-└─────────────────────────────────────────────────────────────────┘
+┌─ myapp | connected | https://myapp.yourdomain.com ───────────────┐
+│ Requests: 42 │ Errors: 1 │ Bytes: 1.2KB/45KB │ Latency: 28ms  │
+├──────────────────────────────────────────────────────────────────┤
+│ Time     Method  Path              Status  Latency  Remote        │
+│ 14:32:05 GET     /                 200     35ms     192.168.1.100│
+│ 14:32:04 POST    /api/users        201     120ms    10.0.0.5      │
+│ 14:32:01 GET     /docs/README.md   200     28ms     172.16.0.10   │
+├──────────────────────────────────────────────────────────────────┤
+│ q:quit  p:pause  c:clear  e:errors  /:filter  Tab:connections     │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### Key Bindings
+### Views
+
+**Logs View** (default): Shows real-time HTTP requests
+- Time, Method, Path, Status (color-coded), Latency, Remote IP
+- Status colors: 🟢 2xx, 🔵 3xx, 🟡 4xx, 🔴 5xx
+
+**Connections View** (press `Tab`): Shows your active tunnels
+```
+┌─ Connections ────────────────────────────────────────────────────┐
+│ Subdomain │ Status │ Uptime  │ Port   │ Last Ping              │
+│ myapp     │ ● ON   │ 15m 23s │ 38421  │ 3s ago                 │
+│ test      │ ◐ STALE│ 5m 7s   │ 34291  │ 2m ago                 │
+├──────────────────────────────────────────────────────────────────┤
+│ Navigation: ↑/↓  Kill: x  Refresh: r  Back: Tab                 │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| `q` | Quit (with export prompt) |
-| `c` | Clear log display |
-| `e` | Toggle error-only filter |
-| `p` | Pause/resume log updates |
-| `f` | Enter filter mode (type to filter) |
-| `Esc` | Clear filter / exit filter mode |
+| `Tab` | Switch between Logs and Connections views |
+| `↑/↓` | Navigate (in Connections view) |
+| `x` | Kill selected connection (Connections view) |
+| `r` | Force refresh connections |
+| `q` | Quit with export prompt |
+| `Ctrl+C` | Quit immediately |
+| `c` | Clear logs |
+| `e` | Toggle errors-only filter |
+| `p` | Pause/resume updates |
+| `/` | Enter filter mode |
+| `Esc` | Cancel filter |
 
-### Statistics Display
+---
 
-The header shows real-time session statistics:
-- **Requests** — Total HTTP requests processed
-- **Errors** — Responses with 4xx/5xx status codes
-- **Bytes** — Total data transferred
-- **Avg** — Average response latency
+## CLI Commands
 
-### JSON Log Export
+### Manage Connections
 
-When you quit the TUI (`q`), you'll be prompted to export logs:
+```bash
+# List your active connections
+remo connections
+
+# Kill a specific connection
+remo kill myapp
+
+# Kill all your connections
+remo kill --all
 ```
-Export request logs to file? (path or 'no'): ./myapp-logs.json
+
+### Connect Options
+
+```bash
+remo connect [flags]
+
+Flags:
+  -s, --server string      SSH server address (user@host:port)
+  -d, --subdomain string   Subdomain to register
+  -u, --upstream string    Local service URL (default: http://127.0.0.1:8080)
+  -i, --identity string    Identity file path (default: ~/.remo/identity.json)
+  --tui                    Enable full-screen TUI dashboard
+  --refresh-interval int   TUI refresh interval in seconds (default: 5)
+  -v, --verbose            Verbose logging
+  -h, --help               Help for connect
 ```
 
-Exported logs include full request details:
-```json
-{
-  "timestamp": "2026-02-19T14:32:01Z",
-  "method": "GET",
-  "path": "/api/users",
-  "status": 200,
-  "duration_ms": 15,
-  "bytes": 2048,
-  "client_ip": "203.0.113.42"
+---
+
+## SSH Key Authentication
+
+Remo uses SSH public key authentication. The setup script handles this automatically, but here's the manual process:
+
+### Generate SSH Key (Client)
+
+```bash
+ssh-keygen -t ed25519 -C "remo-$(whoami)" -f ~/.ssh/id_ed25519
+```
+
+### Add to Server
+
+```bash
+# On server as remo user
+cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+### Subdomain Authorization Rules
+
+In `/home/remo/.ssh/authorized_keys`, each line is: `key comment subdomain-rule`
+
+```
+# Allow any subdomain
+ssh-ed25519 AAAAC3... user@laptop *
+
+# Allow only specific subdomain
+ssh-ed25519 AAAAC3... user@laptop myapp
+
+# Allow pattern
+ssh-ed25519 AAAAC3... user@laptop dev-*
+```
+
+---
+
+## Production Setup with Nginx
+
+### Why Nginx?
+- SSL/TLS termination with Let's Encrypt
+- WebSocket support
+- Better performance
+- Security headers and best practices
+
+### Quick Setup
+
+```bash
+# 1. Install nginx and certbot
+sudo apt install nginx certbot python3-certbot-nginx
+
+# 2. Get SSL certificate
+sudo certbot --nginx -d yourdomain.com -d '*.yourdomain.com'
+
+# 3. Configure nginx site
+sudo tee /etc/nginx/sites-available/yourdomain.com << 'EOF'
+server {
+    listen 443 ssl;
+    server_name *.yourdomain.com;
+
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:18080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
 }
+EOF
+
+# 4. Enable and restart
+sudo ln -s /etc/nginx/sites-available/yourdomain.com /etc/nginx/sites-enabled/
+sudo systemctl restart nginx
 ```
 
 ---
 
 ## Configuration
 
-### Server Configuration
-
-**Location:** `/etc/remo/server.yaml`
+### Server Config: `/etc/remo/server.yaml`
 
 ```yaml
-# Server listen address (behind nginx)
+# Listen address (behind nginx)
 listen: "127.0.0.1:18080"
 
-# Your domain for subdomain routing
-domain: "yourdomain.tld"
+# Domain for wildcard routing
+domain: "yourdomain.com"
 
 # Mode: "standalone" or "behind-proxy"
 mode: behind-proxy
 
-# Trusted proxy IPs (for X-Forwarded-For)
+# Trusted proxies for X-Forwarded-For
 trusted_proxies:
   - "127.0.0.1/32"
-  - "10.0.0.0/8"
 
-# SSH authorized keys file
+# SSH authorized keys
 authorized: /home/remo/.ssh/authorized_keys
 
 # SQLite state database
 state: /var/lib/remo/state.db
 
-# Reserve subdomains on disconnect (allow reconnect)
+# Tunnel timeout (auto-cleanup stale tunnels)
+tunnel_timeout: 5m
+
+# Reserve subdomains on disconnect
 reserve: true
 
-# Admin API secret (for /status, /metrics endpoints)
+# Admin secret (for /admin/* endpoints)
 admin_secret: your-secure-secret-here
 ```
 
-### Client Flags Reference
+### Client Config: `~/.remo/config.yaml`
 
-```bash
-remo connect [flags]
-
-Flags:
-  -s, --server string      SSH server address (required)
-  -d, --subdomain string   Subdomain to register (required)
-  -u, --upstream string    Local service URL (default: http://127.0.0.1:8080)
-  -p, --ssh-port int       SSH server port (default: 22)
-  -i, --identity string    Identity file path (default: ~/.remo/identity.json)
-      --tui                Enable TUI dashboard
-  -v, --verbose            Verbose logging
-  -h, --help               Help for connect
+```yaml
+server: "yourdomain.com"
+refresh_interval: 5s
+tui_mode: fullscreen
 ```
-
-### File Locations
-
-| Path | Purpose |
-|------|---------|
-| `/etc/remo/server.yaml` | Server configuration |
-| `/home/remo/.ssh/authorized_keys` | SSH authorized keys |
-| `/var/lib/remo/state.db` | SQLite state database |
-| `~/.remo/identity.json` | Client identity (SSH key) |
-| `/etc/systemd/system/remo.service` | Systemd service definition |
-| `/var/log/nginx/remo-*.log` | Nginx access/error logs |
 
 ---
 
-## Admin Endpoints
+## File Locations
 
-Remo exposes HTTP endpoints for monitoring and management.
+| File | Purpose |
+|------|---------|
+| `/etc/remo/server.yaml` | Server configuration |
+| `/home/remo/.ssh/authorized_keys` | SSH authorized keys |
+| `/var/lib/remo/state.db` | Server SQLite database |
+| `~/.remo/identity.json` | Client SSH identity |
+| `~/.remo/config.yaml` | Client configuration |
+| `~/.remo/state.json` | Client connection state |
+| `/etc/systemd/system/remo.service` | Systemd service |
 
-### Endpoint Reference
+---
 
-| Endpoint | Auth | Description |
-|----------|------|-------------|
-| `GET /healthz` | None | Health check endpoint |
-| `GET /status` | Bearer | JSON status and tunnel information |
-| `GET /metrics` | Bearer | Prometheus-compatible metrics |
-| `GET /events` | None | Server-sent events stream (localhost only) |
+## Security
 
-### Authentication
+### SSH Security
+- Ed25519 keys (modern, secure)
+- No password authentication
+- Standard SSH protocol (no custom crypto)
 
-Admin endpoints require the `admin_secret` from server configuration:
+### Tunnel Security
+- Reverse tunnel means server initiates no outbound connections
+- Your local service is never directly exposed
+- All traffic encrypted via SSH tunnel
 
-```bash
-# Using curl with Bearer token
-curl -H "Authorization: Bearer your-admin-secret" \
-  https://yourserver.com/status
+### Rate Limiting
+- Admin endpoints: 5 attempts per minute per IP
+- Prevents brute force on management APIs
 
-# Using the remo CLI
-remo status --server https://yourserver.com --secret your-admin-secret
-```
+### Error Handling
+- Returns 404 for all errors (prevents subdomain enumeration)
+- No information leakage in error messages
+- Debug headers only visible with proper authorization
 
-**Security Note:** The `/events` endpoint is restricted to localhost-only access. This ensures event streams are only accessible through the authenticated SSH tunnel, not directly from the internet.
-
-### Example Responses
-
-**Health Check:**
-```bash
-curl https://yourserver.com/healthz
-# Output: OK
-```
-
-**Status Endpoint:**
-```bash
-curl -H "Authorization: Bearer secret" https://yourserver.com/status
-```
-
-```json
-{
-  "version": "0.1.0",
-  "uptime": "72h15m30s",
-  "tunnels": {
-    "active": 5,
-    "total": 12
-  },
-  "subdomains": [
-    {"name": "myapp", "client": "alice", "uptime": "2h30m"},
-    {"name": "api", "client": "bob", "uptime": "45m"}
-  ]
-}
-```
-
-**Metrics Endpoint:**
-```bash
-curl -H "Authorization: Bearer secret" https://yourserver.com/metrics
-```
-
-```
-# HELP remo_requests_total Total HTTP requests
-# TYPE remo_requests_total counter
-remo_requests_total 15234
-
-# HELP remo_request_duration_seconds Request duration
-# TYPE remo_request_duration_seconds histogram
-remo_request_duration_seconds_bucket{le="0.1"} 5234
-remo_request_duration_seconds_bucket{le="0.5"} 12456
-remo_request_duration_seconds_bucket{le="1.0"} 14890
-```
+### State Files
+- Client state: `0600` permissions (owner only)
+- No SSH private keys stored in state
+- Only connection metadata: subdomain, pid, port, timestamps
 
 ---
 
 ## Troubleshooting
 
 ### Connection Refused
-
-**Problem:** Cannot connect to server
-
-**Solutions:**
 ```bash
-# Check if Remo server is running
-sudo systemctl status remo
+# Check server is running
+ssh your-server 'sudo systemctl status remo'
 
-# Check server logs
-sudo journalctl -u remo -f
+# Check SSH connectivity
+ssh -v remo@your-server
 
-# Verify SSH port is accessible
-nc -zv yourserver.com 22
-
-# Test SSH connection directly
-ssh -i ~/.ssh/remo_ed25519 -p 2222 remo@yourserver.com
+# Check firewall
+ssh your-server 'sudo ufw status'
 ```
 
-### 502 Bad Gateway
-
-**Problem:** Nginx shows 502 error
-
-**Solutions:**
+### Subdomain Already Reserved
 ```bash
-# Check if Remo is listening on correct port
-sudo ss -tlnp | grep 18080
+# Kill existing connection
+remo kill myapp
 
-# Verify nginx upstream configuration
-grep proxy_pass /etc/nginx/sites-available/remo
-
-# Check nginx error logs
-sudo tail -f /var/log/nginx/remo-error.log
-
-# Test Remo directly
-curl http://127.0.0.1:18080/healthz
+# Or wait for automatic cleanup (5 minutes)
 ```
 
-### Permission Denied (SSH)
+### TUI Not Full-Screen
+The TUI uses alternate screen buffer (like vim). If it doesn't clear screen:
+1. Check terminal supports escape sequences
+2. Try: `export TERM=xterm-256color`
+3. Use `--tui` flag (required for full-screen)
 
-**Problem:** SSH key authentication fails
-
-**Solutions:**
-```bash
-# Check key file permissions (client)
-ls -la ~/.ssh/remo_ed25519
-# Should be: -rw------- (600)
-chmod 600 ~/.ssh/remo_ed25519
-
-# Check authorized_keys permissions (server)
-sudo su - remo -c "ls -la ~/.ssh/"
-# Should be: -rw------- (600) for authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-chmod 700 ~/.ssh/
-
-# Verify key is in authorized_keys
-grep "$(cat ~/.ssh/remo_ed25519.pub)" /home/remo/.ssh/authorized_keys
-```
-
-### Subdomain Not Found
-
-**Problem:** Subdomain returns "not found" or 404
-
-**Solutions:**
-```bash
-# Check if client is still connected
-remo status --server yourserver.com --secret your-secret
-
-# Verify subdomain registration
-# Look for "Registered subdomain" in client output
-
-# Check DNS resolution
-dig +short myapp.yourdomain.tld
-
-# Test without nginx
-curl -H "Host: myapp.yourdomain.tld" http://127.0.0.1:18080
-```
-
-### TUI Not Showing Logs
-
-**Problem:** TUI dashboard appears but no request logs
-
-**Solutions:**
-- Ensure you started with `--tui` flag
-- Check that requests are actually hitting your subdomain
-- Verify the TUI is not paused (press `p` to toggle)
-- Check if filters are active (press `Esc` to clear)
-
-### Server Management Commands
-
-```bash
-# View service status
-sudo systemctl status remo
-
-# View logs in real-time
-sudo journalctl -u remo -f
-
-# Restart service
-sudo systemctl restart remo
-
-# Check nginx configuration
-sudo nginx -t
-
-# Reload nginx
-sudo systemctl reload nginx
+### Client IP Shows 127.0.0.1
+Ensure nginx adds `X-Forwarded-For` header:
+```nginx
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 ```
 
 ---
 
-## Development
-
-### Building from Source
+## Building from Source
 
 ```bash
-# Clone repository
+# Clone
 git clone https://github.com/gleicon/remo.git
 cd remo
 
-# Build all binaries
-go build ./...
+# Build
+go build -o remo ./cmd/remo
 
-# Run tests
-go test ./...
-
-# Build specific binary
-go build -o remo-server ./cmd/server
-go build -o remo-client ./cmd/client
-```
-
-### Project Structure
-
-```
-remo/
-├── cmd/
-│   ├── server/        # Server binary
-│   └── client/        # Client binary
-├── internal/
-│   ├── server/        # Server implementation
-│   ├── client/        # Client implementation
-│   ├── tui/           # Terminal UI
-│   └── ssh/           # SSH tunnel handling
-├── docs/              # Documentation
-├── scripts/           # Setup scripts
-└── README.md          # This file
+# Cross-compile for server
+GOOS=linux GOARCH=amd64 go build -o remo-linux ./cmd/remo
 ```
 
 ---
 
 ## Documentation
 
-- **[docs/nginx.md](docs/nginx.md)** — Production nginx setup with Let's Encrypt SSL
-- **[docs/ssh-setup.md](docs/ssh-setup.md)** — SSH key generation and authorization
-- **[docs/nginx-example.conf](docs/nginx-example.conf)** — Example production nginx configuration
+- [SSH Setup Guide](docs/ssh-setup.md) — Detailed SSH key configuration
+- [Nginx Setup](docs/nginx.md) — Production nginx configuration
+- [API Reference](docs/api.md) — Server endpoints and API
 
 ---
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
----
-
-## Support
-
-- **Issues:** [GitHub Issues](https://github.com/gleicon/remo/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/gleicon/remo/discussions)
-
----
-
-*Built with Go. Powered by SSH. Made with ♥ for developers who need simple, secure tunnels.*
+MIT License — see [LICENSE](LICENSE) file.
