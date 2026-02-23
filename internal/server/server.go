@@ -206,8 +206,8 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 			s.log.Info().Str("action", "kill_ssh").Msgf(format, v...)
 		}
 
-		// Clear all tunnels and kill SSH processes using sudo for elevated permissions
-		removed, killCommands := s.registry.clearAll(killLogger, true)
+		// Clear all tunnels and kill SSH processes (NO SUDO - remo user kills its own processes)
+		removed, killCommands := s.registry.clearAll(killLogger, false)
 
 		if len(removed) > 0 {
 			s.log.Info().

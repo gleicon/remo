@@ -1,6 +1,7 @@
 package server
 
 import (
+	"os"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -202,57 +203,62 @@ func (r *registry) listByPubKey(pubKey string) []TunnelEntry {
 	return result
 }
 
-// clearAll removes all tunnels from the registry and kills associated SSH processes
+// clearAll removes all tunnels from the registry and kills ALL remo-owned SSH processes
 // Returns list of removed subdomains and executed kill commands
-// If useSudo is true, kill commands will be prefixed with sudo
+// Uses pgrep to find all remo-owned sshd processes and kills them all at once
 func (r *registry) clearAll(log func(string, ...interface{}), useSudo bool) ([]string, []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	removed := make([]string, 0, len(r.active))
-	killCommands := make([]string, 0)
-
-	for subdomain, entry := range r.active {
+	for subdomain := range r.active {
 		removed = append(removed, subdomain)
-
-		// Try to kill the SSH process
-		if entry.SSHPID > 0 {
-			killCmd := r.killSSHProcess(entry.SSHPID, subdomain, log, useSudo)
-			if killCmd != "" {
-				killCommands = append(killCommands, killCmd)
-			}
-		}
-
-		// Also try to find and kill by port as fallback
-		portKillCmd := r.killByPort(entry.Port, subdomain, log, useSudo)
-		if portKillCmd != "" {
-			killCommands = append(killCommands, portKillCmd)
-		}
-
 		delete(r.active, subdomain)
 	}
+
+	// Kill ALL remo-owned sshd processes at once - simple and effective
+	killCmd := r.killAllRemoSSH(log, useSudo)
+	killCommands := []string{}
+	if killCmd != "" {
+		killCommands = append(killCommands, killCmd)
+	}
+
 	return removed, killCommands
 }
 
-// killSSHProcess kills a specific SSH process and returns the command used
+// killSSHProcess kills a specific SSH process owned by the same user
+// Returns the command used. Only uses sudo for discovery, not for kill.
 func (r *registry) killSSHProcess(pid int, subdomain string, log func(string, ...interface{}), useSudo bool) string {
 	if pid <= 0 {
 		return ""
 	}
 
-	var cmd *exec.Cmd
-	if useSudo {
-		cmd = exec.Command("sudo", "kill", "-9", strconv.Itoa(pid))
-	} else {
-		cmd = exec.Command("kill", "-9", strconv.Itoa(pid))
+	// Verify process is owned by current user before killing
+	owner, err := r.getProcessOwner(pid)
+	if err != nil {
+		if log != nil {
+			log("Cannot determine owner of PID %d for %s: %v", pid, subdomain, err)
+		}
+		return ""
 	}
-	err := cmd.Run()
+
+	currentUser := os.Getenv("USER")
+	if currentUser == "" {
+		currentUser = "remo" // fallback
+	}
+
+	if owner != currentUser {
+		if log != nil {
+			log("PID %d for %s is owned by %s, not %s - skipping kill", pid, subdomain, owner, currentUser)
+		}
+		return ""
+	}
+
+	// Kill without sudo since we own the process
+	cmd := exec.Command("kill", "-9", strconv.Itoa(pid))
+	err = cmd.Run()
 
 	cmdStr := "kill -9 " + strconv.Itoa(pid)
-	if useSudo {
-		cmdStr = "sudo " + cmdStr
-	}
-
 	if err != nil {
 		if log != nil {
 			log("Failed to kill SSH process for %s (PID %d): %v", subdomain, pid, err)
@@ -266,9 +272,61 @@ func (r *registry) killSSHProcess(pid int, subdomain string, log func(string, ..
 	return cmdStr
 }
 
+// getProcessOwner returns the username that owns a process
+func (r *registry) getProcessOwner(pid int) (string, error) {
+	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "user=")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// killAllRemoSSH kills ALL sshd processes owned by the remo user
+// NO SUDO NEEDED - remo user kills its own processes
+// This is the simplest and most effective approach - when remo stops, all remo SSH tunnels die
+func (r *registry) killAllRemoSSH(log func(string, ...interface{}), useSudo bool) string {
+	// Use pgrep to find all sshd processes owned by remo (no sudo needed to discover own processes)
+	cmd := exec.Command("pgrep", "-u", "remo", "-x", "sshd")
+
+	output, err := cmd.Output()
+	if err != nil {
+		// No processes found or error
+		return ""
+	}
+
+	pids := strings.Fields(string(output))
+	if len(pids) == 0 {
+		return ""
+	}
+
+	// Kill all PIDs at once (no sudo - remo kills its own processes)
+	args := []string{"-9"}
+	args = append(args, pids...)
+	killCmd := exec.Command("kill", args...)
+
+	killErr := killCmd.Run()
+
+	cmdStr := "pgrep -u remo -x sshd | xargs kill -9"
+
+	if killErr != nil {
+		if log != nil {
+			log("Killed %d remo-owned sshd processes (PIDs: %s) - some may have failed: %v",
+				len(pids), strings.Join(pids, ", "), killErr)
+		}
+		return cmdStr + " (PIDs: " + strings.Join(pids, ", ") + ", some FAILED: " + killErr.Error() + ")"
+	}
+
+	if log != nil {
+		log("Killed all %d remo-owned sshd processes (PIDs: %s)", len(pids), strings.Join(pids, ", "))
+	}
+	return cmdStr + " (PIDs: " + strings.Join(pids, ", ") + ")"
+}
+
 // killByPort finds and kills SSH processes by the tunnel port
+// SAFETY: Only uses sudo for discovery (lsof), NOT for kill. Verifies process ownership.
 func (r *registry) killByPort(port int, subdomain string, log func(string, ...interface{}), useSudo bool) string {
-	// Use lsof with sudo if needed to find processes listening on this port
+	// Use lsof with sudo for discovery only (to find all processes on the port)
 	var lsofCmd *exec.Cmd
 	if useSudo {
 		lsofCmd = exec.Command("sudo", "lsof", "-t", "-i", ":"+strconv.Itoa(port))
@@ -283,32 +341,42 @@ func (r *registry) killByPort(port int, subdomain string, log func(string, ...in
 
 	pids := strings.Fields(string(output))
 	killed := make([]string, 0)
+	currentUser := os.Getenv("USER")
+	if currentUser == "" {
+		currentUser = "remo"
+	}
 
 	for _, pidStr := range pids {
-		_, err := strconv.Atoi(pidStr)
+		pid, err := strconv.Atoi(pidStr)
 		if err != nil {
 			continue
 		}
 
-		// Verify it's an sshd process (also with sudo if needed)
-		var psCmd *exec.Cmd
-		if useSudo {
-			psCmd = exec.Command("sudo", "ps", "-p", pidStr, "-o", "comm=")
-		} else {
-			psCmd = exec.Command("ps", "-p", pidStr, "-o", "comm=")
-		}
+		// Verify it's an sshd process
+		psCmd := exec.Command("ps", "-p", pidStr, "-o", "comm=")
 		psOutput, _ := psCmd.Output()
 		if !strings.Contains(string(psOutput), "sshd") {
 			continue
 		}
 
-		// Kill it
-		var killCmd *exec.Cmd
-		if useSudo {
-			killCmd = exec.Command("sudo", "kill", "-9", pidStr)
-		} else {
-			killCmd = exec.Command("kill", "-9", pidStr)
+		// CRITICAL: Verify we own this process before killing (security!)
+		owner, err := r.getProcessOwner(pid)
+		if err != nil {
+			if log != nil {
+				log("Cannot verify owner of PID %s on port %d for %s - skipping", pidStr, port, subdomain)
+			}
+			continue
 		}
+
+		if owner != currentUser {
+			if log != nil {
+				log("PID %s on port %d is owned by %s, not %s - skipping kill", pidStr, port, owner, currentUser)
+			}
+			continue
+		}
+
+		// Kill WITHOUT sudo since we verified ownership
+		killCmd := exec.Command("kill", "-9", pidStr)
 		killErr := killCmd.Run()
 
 		if killErr != nil {
@@ -326,7 +394,7 @@ func (r *registry) killByPort(port int, subdomain string, log func(string, ...in
 
 	cmdStr := "lsof -t -i :" + strconv.Itoa(port) + " | xargs kill -9"
 	if useSudo {
-		cmdStr = "sudo " + cmdStr
+		cmdStr = "sudo " + cmdStr + " (discovery only, kill without sudo)"
 	}
 
 	if len(killed) > 0 {
