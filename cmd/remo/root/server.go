@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -148,6 +149,10 @@ func runServer(cmd *cobra.Command, r *rootCommand, opts *serverOptions) error {
 	err = srv.Run(ctx, opts.listen)
 	if st != nil {
 		st.Close()
+	}
+	// Don't return error for graceful shutdown
+	if err == http.ErrServerClosed {
+		return nil
 	}
 	return err
 }
