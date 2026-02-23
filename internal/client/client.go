@@ -620,7 +620,14 @@ func (c *Client) startConnectionsPolling(ctx context.Context) {
 
 func (c *Client) pollAndForwardEvents() error {
 	// Fetch events from server through the tunnel
-	resp, err := c.eventsClient.Get("http://127.0.0.1:18080/events")
+	publicKey := base64.StdEncoding.EncodeToString(c.cfg.Identity.Public)
+	req, err := http.NewRequest("GET", "http://127.0.0.1:18080/events", nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-Remo-Publickey", publicKey)
+
+	resp, err := c.eventsClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("fetch events: %w", err)
 	}
@@ -646,6 +653,9 @@ func (c *Client) pollAndForwardEvents() error {
 	}
 
 	// Forward new events to TUI and store for export
+	if len(events) > c.lastEventIndex {
+		c.log.Debug().Int("new_events", len(events)-c.lastEventIndex).Int("total_events", len(events)).Msg("received events from server")
+	}
 	for i := c.lastEventIndex; i < len(events); i++ {
 		evt := events[i]
 		c.sendUI(tui.RequestLogMsg{
