@@ -187,6 +187,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) Run(ctx context.Context, addr string) error {
+	s.log.Info().Str("addr", addr).Str("domain", s.cfg.Domain).Msg("server starting")
 	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
