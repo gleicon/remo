@@ -152,3 +152,16 @@ func (r *registry) listByPubKey(pubKey string) []TunnelEntry {
 	}
 	return result
 }
+
+// clearAll removes all tunnels from the registry (used during server shutdown)
+func (r *registry) clearAll() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	removed := make([]string, 0, len(r.active))
+	for subdomain := range r.active {
+		removed = append(removed, subdomain)
+		delete(r.active, subdomain)
+	}
+	return removed
+}

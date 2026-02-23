@@ -198,6 +198,15 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+
+		// Clear all tunnels from registry to disconnect clients gracefully
+		removed := s.registry.clearAll()
+		if len(removed) > 0 {
+			s.log.Info().Int("tunnels_removed", len(removed)).Strs("subdomains", removed).Msg("server shutting down - removed all tunnels")
+		} else {
+			s.log.Info().Msg("server shutting down - no active tunnels")
+		}
+
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
 
