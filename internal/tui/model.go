@@ -118,6 +118,7 @@ type Model struct {
 	connections    []ConnectionEntry
 	connSelected   int
 	errorBanner    *ErrorBanner
+	killRequest    chan<- KillConnectionMsg // Channel to send kill requests to client
 }
 
 // ErrorBanner displays inline error messages in the TUI
@@ -166,6 +167,11 @@ type QuitMsg struct {
 	FilePath string
 }
 
+// KillConnectionMsg is sent when user presses 'x' to kill a connection
+type KillConnectionMsg struct {
+	Subdomain string
+}
+
 // ConnectionsMsg updates the connections list in the TUI
 type ConnectionsMsg struct {
 	Connections []ConnectionEntry
@@ -179,7 +185,7 @@ type ErrorMsg struct {
 	StatusCode int
 }
 
-func NewModel(subdomain string) Model {
+func NewModel(subdomain string, killChan chan<- KillConnectionMsg) Model {
 	input := textinput.New()
 	input.Prompt = "/"
 	input.CharLimit = 64
@@ -190,6 +196,7 @@ func NewModel(subdomain string) Model {
 		currentView:  ViewLogs,
 		connections:  []ConnectionEntry{},
 		connSelected: 0,
+		killRequest:  killChan,
 	}
 }
 
@@ -318,6 +325,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			if m.currentView == ViewConnections && m.connSelected < len(m.connections)-1 {
 				m.connSelected++
+			}
+		case "x":
+			// Kill selected connection
+			if m.currentView == ViewConnections && m.connSelected < len(m.connections) {
+				conn := m.connections[m.connSelected]
+				if m.killRequest != nil {
+					select {
+					case m.killRequest <- KillConnectionMsg{Subdomain: conn.Subdomain}:
+						// Successfully sent kill request
+					default:
+						// Channel full, skip
+					}
+				}
 			}
 		}
 	}

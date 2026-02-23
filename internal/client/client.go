@@ -5,6 +5,7 @@ package client
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -71,6 +72,7 @@ type Client struct {
 	exportedLogs      []requestLogEntry
 	logsMu            sync.RWMutex
 	quitResult        chan tui.QuitMsg
+	killRequest       chan tui.KillConnectionMsg
 	connectionsTicker *time.Ticker
 	publicKeyBase64   string
 }
@@ -107,7 +109,8 @@ func New(cfg Config) (*Client, error) {
 		pollInterval: time.Second, // Poll every second per locked decision
 	}
 	if cfg.EnableTUI {
-		model := tui.NewModel(cfg.Subdomain)
+		client.killRequest = make(chan tui.KillConnectionMsg, 10)
+		model := tui.NewModel(cfg.Subdomain, client.killRequest)
 		// Use WithAltScreen for full-screen TUI mode (like vim/htop)
 		client.uiProgram = tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
 	}
@@ -470,6 +473,9 @@ func (c *Client) startUI() {
 				c.uiProgram.Quit()
 			}
 		}()
+
+		// Start kill request handler
+		go c.handleKillRequests()
 	})
 }
 
@@ -528,6 +534,43 @@ func (c *Client) Close() error {
 	}
 	// Handle any pending quit/export
 	c.handleQuit()
+	return nil
+}
+
+func (c *Client) handleKillRequests() {
+	for msg := range c.killRequest {
+		c.log.Info().Str("subdomain", msg.Subdomain).Msg("kill requested from TUI")
+		// Send unregister request to server
+		if err := c.unregisterSubdomain(msg.Subdomain); err != nil {
+			c.log.Error().Err(err).Str("subdomain", msg.Subdomain).Msg("failed to kill connection")
+		} else {
+			c.log.Info().Str("subdomain", msg.Subdomain).Msg("connection killed successfully")
+		}
+	}
+}
+
+func (c *Client) unregisterSubdomain(subdomain string) error {
+	publicKey := base64.StdEncoding.EncodeToString(c.cfg.Identity.Public)
+
+	reqBody, _ := json.Marshal(map[string]string{"subdomain": subdomain})
+	req, err := http.NewRequest("POST", "http://127.0.0.1:18080/unregister", bytes.NewReader(reqBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Remo-Publickey", publicKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unregister failed with status %d", resp.StatusCode)
+	}
+
 	return nil
 }
 
