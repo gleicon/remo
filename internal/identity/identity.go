@@ -183,3 +183,23 @@ func DefaultPath() string {
 	}
 	return filepath.Join(home, ".remo", "identity.json")
 }
+
+// ClientID returns a short unique identifier derived from the public key
+// This is used for client-side logging and state management
+func (i *Identity) ClientID() string {
+	if i == nil || i.Public == nil {
+		return ""
+	}
+	// Use first 16 bytes of public key hash for short unique ID
+	// Full public key in base64 is too long for logs/filenames
+	return base64.StdEncoding.EncodeToString(i.Public)[:16]
+}
+
+// PublicKeyHash returns the full base64-encoded public key
+// Used for server authentication
+func (i *Identity) PublicKeyHash() string {
+	if i == nil || i.Public == nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(i.Public)
+}

@@ -113,14 +113,15 @@ type Server struct {
 
 // RequestEvent represents a captured HTTP request for TUI logging
 type RequestEvent struct {
-	Time     time.Time     `json:"time"`
-	Method   string        `json:"method"`
-	Path     string        `json:"path"`
-	Status   int           `json:"status"`
-	Latency  time.Duration `json:"latency"`
-	Remote   string        `json:"remote"`
-	BytesIn  int           `json:"bytes_in"`
-	BytesOut int           `json:"bytes_out"`
+	Time      time.Time     `json:"time"`
+	Method    string        `json:"method"`
+	Path      string        `json:"path"`
+	Status    int           `json:"status"`
+	Latency   time.Duration `json:"latency"`
+	Remote    string        `json:"remote"`
+	BytesIn   int           `json:"bytes_in"`
+	BytesOut  int           `json:"bytes_out"`
+	PublicKey string        `json:"public_key"` // Owner of this tunnel
 }
 
 func New(cfg Config) *Server {
@@ -579,7 +580,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	start := time.Now()
 	remoteAddr := s.peerAddress(r)
-	s.log.Debug().Str("subdomain", subdomain).Str("method", r.Method).Str("target", r.URL.RequestURI()).Str("remote", remoteAddr).Msg("incoming request")
+	// Log all incoming requests at Info level for server-side monitoring (journalctl)
+	s.log.Info().
+		Str("subdomain", subdomain).
+		Str("method", r.Method).
+		Str("path", r.URL.RequestURI()).
+		Str("remote", remoteAddr).
+		Str("host", r.Host).
+		Msg("incoming request")
 
 	port, pubKey, ok := s.registry.get(subdomain)
 	if !ok {
@@ -613,15 +621,26 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	s.metrics.Record(subdomain, int64(r.ContentLength), int64(rw.bytesWritten), latency, rw.statusCode >= 500)
 
+	// Log request completion for server-side monitoring (journalctl)
+	s.log.Info().
+		Str("subdomain", subdomain).
+		Str("method", r.Method).
+		Str("path", r.URL.RequestURI()).
+		Int("status", rw.statusCode).
+		Dur("latency", latency).
+		Int("bytes_in", rw.bytesWritten).
+		Msg("request completed")
+
 	s.recordEvent(RequestEvent{
-		Time:     time.Now(),
-		Method:   r.Method,
-		Path:     r.URL.RequestURI(),
-		Status:   rw.statusCode,
-		Latency:  latency,
-		Remote:   remoteAddr,
-		BytesIn:  int(r.ContentLength),
-		BytesOut: rw.bytesWritten,
+		Time:      time.Now(),
+		Method:    r.Method,
+		Path:      r.URL.RequestURI(),
+		Status:    rw.statusCode,
+		Latency:   latency,
+		Remote:    remoteAddr,
+		BytesIn:   int(r.ContentLength),
+		BytesOut:  rw.bytesWritten,
+		PublicKey: pubKey, // Tag event with tunnel owner
 	})
 }
 
@@ -678,13 +697,25 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get client's public key to filter events
+	clientPubKey := r.Header.Get("X-Remo-Publickey")
+	if clientPubKey == "" {
+		http.Error(w, "missing X-Remo-Publickey header", http.StatusBadRequest)
+		return
+	}
+
 	s.eventsMu.RLock()
-	events := make([]RequestEvent, len(s.requestEvents))
-	copy(events, s.requestEvents)
+	// Filter events to only return those belonging to this client
+	var filteredEvents []RequestEvent
+	for _, evt := range s.requestEvents {
+		if evt.PublicKey == clientPubKey {
+			filteredEvents = append(filteredEvents, evt)
+		}
+	}
 	s.eventsMu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(events); err != nil {
+	if err := json.NewEncoder(w).Encode(filteredEvents); err != nil {
 		s.log.Error().Err(err).Msg("failed to encode events")
 	}
 }
