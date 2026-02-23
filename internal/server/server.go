@@ -199,12 +199,29 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		// Clear all tunnels from registry to disconnect clients gracefully
-		removed := s.registry.clearAll()
+		s.log.Info().Msg("server shutting down - disconnecting all SSH tunnels")
+
+		// Create logger function for kill commands
+		killLogger := func(format string, v ...interface{}) {
+			s.log.Info().Str("action", "kill_ssh").Msgf(format, v...)
+		}
+
+		// Clear all tunnels and kill SSH processes using sudo for elevated permissions
+		removed, killCommands := s.registry.clearAll(killLogger, true)
+
 		if len(removed) > 0 {
-			s.log.Info().Int("tunnels_removed", len(removed)).Strs("subdomains", removed).Msg("server shutting down - removed all tunnels")
+			s.log.Info().
+				Int("tunnels_removed", len(removed)).
+				Strs("subdomains", removed).
+				Strs("kill_commands", killCommands).
+				Msg("server shutting down - removed all tunnels and killed SSH processes")
+
+			// Log each kill command individually for visibility
+			for _, cmd := range killCommands {
+				s.log.Info().Str("kill_command", cmd).Msg("executed SSH tunnel cleanup")
+			}
 		} else {
-			s.log.Info().Msg("server shutting down - no active tunnels")
+			s.log.Info().Msg("server shutting down - no active tunnels to clean up")
 		}
 
 		_ = httpServer.Shutdown(shutdownCtx)
@@ -339,7 +356,13 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.log.Info().Str("subdomain", subdomain).Int("port", req.RemotePort).Msg("tunnel registered")
+	// Get the tracked SSH PID for debugging
+	sshpid := s.registry.GetSSHPID(subdomain)
+	if sshpid > 0 {
+		s.log.Info().Str("subdomain", subdomain).Int("port", req.RemotePort).Int("sshpid", sshpid).Msg("tunnel registered with SSH process tracked")
+	} else {
+		s.log.Info().Str("subdomain", subdomain).Int("port", req.RemotePort).Msg("tunnel registered - SSH process not tracked (will use port-based kill on shutdown)")
+	}
 
 	scheme := "http"
 	if s.cfg.Mode == ModeStandalone {
