@@ -12,7 +12,8 @@ import (
 func New(level string) zerolog.Logger {
 	zerolog.TimeFieldFormat = time.RFC3339Nano
 	logLevel := parseLevel(level)
-	logger := zerolog.New(os.Stdout).Level(logLevel).With().Timestamp().Logger()
+	output := zerolog.SyncWriter(os.Stdout)
+	logger := zerolog.New(output).Level(logLevel).With().Timestamp().Logger()
 	return logger
 }
 

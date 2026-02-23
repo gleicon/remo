@@ -26,9 +26,7 @@ func NewRootCommand(ctx context.Context) *cobra.Command {
 		Short:   "Self-hosted reverse tunnel",
 		Version: Version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if r.logger.GetLevel() != zerolog.NoLevel {
-				return nil
-			}
+			// Always initialize logger to ensure it's properly set up
 			level := r.logLevel
 			if level == "" {
 				level = os.Getenv("REMO_LOG")
