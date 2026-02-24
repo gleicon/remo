@@ -206,8 +206,8 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 			s.log.Info().Str("action", "kill_ssh").Msgf(format, v...)
 		}
 
-		// Clear all tunnels and kill SSH processes (NO SUDO - remo user kills its own processes)
-		removed, killCommands := s.registry.clearAll(killLogger, false)
+		// Clear all tunnels and kill SSH processes
+		removed, killCommands := s.registry.clearAll(killLogger)
 
 		if len(removed) > 0 {
 			s.log.Info().
@@ -356,13 +356,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the tracked SSH PID for debugging
-	sshpid := s.registry.GetSSHPID(subdomain)
-	if sshpid > 0 {
-		s.log.Info().Str("subdomain", subdomain).Int("port", req.RemotePort).Int("sshpid", sshpid).Msg("tunnel registered with SSH process tracked")
-	} else {
-		s.log.Info().Str("subdomain", subdomain).Int("port", req.RemotePort).Msg("tunnel registered - SSH process not tracked (will use port-based kill on shutdown)")
-	}
+	s.log.Info().Str("subdomain", subdomain).Int("port", req.RemotePort).Msg("tunnel registered")
 
 	scheme := "http"
 	if s.cfg.Mode == ModeStandalone {
