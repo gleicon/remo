@@ -9,7 +9,8 @@ import (
 )
 
 func TestModelStateUpdates(t *testing.T) {
-	m := NewModel("demo")
+	killCh := make(chan KillConnectionMsg)
+	m := NewModel("demo", killCh)
 	if _, ok := interface{}(m).(tea.Model); !ok {
 		t.Fatalf("model does not implement tea.Model")
 	}
@@ -21,7 +22,8 @@ func TestModelStateUpdates(t *testing.T) {
 }
 
 func TestModelLogsFilters(t *testing.T) {
-	m := NewModel("demo")
+	killCh := make(chan KillConnectionMsg)
+	m := NewModel("demo", killCh)
 	for i := 0; i < maxLogs; i++ {
 		status := 200
 		if i%2 == 0 {
@@ -45,7 +47,8 @@ func TestModelLogsFilters(t *testing.T) {
 }
 
 func TestModelPauseClear(t *testing.T) {
-	m := NewModel("demo")
+	killCh := make(chan KillConnectionMsg)
+	m := NewModel("demo", killCh)
 	m.paused = true
 	updated, _ := m.Update(RequestLogMsg{Time: time.Now(), Method: "GET", Path: "/", Status: 200})
 	m = updated.(Model)
