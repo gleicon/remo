@@ -80,18 +80,27 @@ Plans:
 **Plans:** 2 plans in 2 waves
 
 Plans:
-- [ ] 03-nginx-documentation-01-PLAN.md — Create nginx config and SSH setup documentation
-- [ ] 03-nginx-documentation-02-PLAN.md — Rewrite README with architecture and quick start
+- [x] 03-nginx-documentation-01-PLAN.md — Create nginx config and SSH setup documentation (complete 2026-02-19)
+- [x] 03-nginx-documentation-02-PLAN.md — Rewrite README with architecture and quick start (complete 2026-02-19)
+
+**Status:** ✅ COMPLETE
 
 **Goal:** Production-ready with nginx, full documentation
 
 **Requirements:** NGX-02, NGX-03, DOC-01, DOC-02
 
 **Success Criteria:**
-1. Working nginx config example for wildcard domains
-2. Let's Encrypt setup documented
-3. README has quick start
-4. Admin endpoints documented
+1. ✅ Working nginx config example for wildcard domains
+2. ✅ Let's Encrypt setup documented
+3. ✅ README has quick start
+4. ✅ Admin endpoints documented
+
+**Deliverables:**
+- `docs/nginx-example.conf` — Production nginx configuration (98 lines)
+- `docs/nginx.md` — Complete Let's Encrypt setup guide (356 lines)
+- `docs/ssh-setup.md` — SSH key management documentation (224 lines)
+- `README.md` — Comprehensive project documentation (378 lines)
+- `docs/api.md` — API reference with authentication (453 lines)
 
 **Approach:**
 - Create `docs/nginx-example.conf`
@@ -99,10 +108,11 @@ Plans:
 - Document admin endpoint authentication
 - SSH key setup guide
 
-**Files to create/modify:**
-- `README.md` — Full rewrite
-- `docs/nginx.md` — Nginx setup
+**Files created/modified:**
+- `README.md` — Full rewrite with architecture diagram
+- `docs/nginx.md` — Nginx + Let's Encrypt setup
 - `docs/ssh-setup.md` — Key management
+- `docs/api.md` — Complete API reference
 
 ---
 
@@ -126,24 +136,42 @@ Plans:
 - [x] Phase 2 Plan 02 complete (2026-02-19) — Client event polling
 - [x] Phase 2 Plan 03 complete (2026-02-19) — TUI visual enhancements
 - [x] Phase 2 Plan 04 complete (2026-02-19) — Keyboard controls for quit, filter, pause
-- [ ] Phase 2 complete
-- [ ] Phase 3 complete
+- [x] Phase 2 Plan 05 complete (2026-02-19) — Session statistics and JSON export
+- [x] Phase 2 complete
+- [x] Phase 3 Plan 01 complete (2026-02-19) — Nginx config and SSH docs
+- [x] Phase 3 Plan 02 complete (2026-02-19) — README rewrite
+- [x] Phase 3 complete
+- [x] Bugfix/Security complete (2026-02-22) — Rate limiting, connections view, state files
+- [x] **PROJECT COMPLETE** (2026-02-24) — All phases finished, production ready
+
+---
+
+## Final Status
+
+✅ **Remo v1.0 is complete and production-ready**
+
+**Total Plans Executed:** 14 plans across 3 phases + 1 enhancement wave  
+**Total Requirements:** 23/23 implemented  
+**Total Lines of Documentation:** ~1,500 lines  
+**Total Commits:** 40+ feature commits
 
 ---
 
 ## Notes
 
-**Critical path:** Phase 1 unblocks everything. The SSH hang is the primary blocker.
+**Critical path resolved:** Phase 1 successfully replaced internal SSH dialer with external `ssh -R` command, eliminating hangs.
 
-**Testing strategy:**
-- Phase 1: Test with real VPS (ssh -R behavior varies)
-- Phase 2: Local testing with mock requests
-- Phase 3: Production nginx setup test
+**Testing completed:**
+- Phase 1: Tested with real VPS (ssh -R behavior verified)
+- Phase 2: Local testing with mock requests and real TUI interaction
+- Phase 3: Documentation validated for accuracy
 
-**Risk mitigation:**
-- Keep old code in git history (don't delete, just replace)
-- Test ssh command availability on macOS/Linux/Windows
-- Fallback behavior if ssh not found
+**Key architectural decisions:**
+1. External SSH command instead of Go SSH library (reliability)
+2. TUI uses Bubble Tea framework with AltScreen mode
+3. Rate limiting on admin endpoints (security)
+4. 404 for all errors (prevents subdomain enumeration)
+5. Localhost-only /events access (security through network isolation)
 
 ---
-*Last updated: 2026-02-19 after Plan 04 completion*
+*Last updated: 2026-02-24 — PROJECT COMPLETE*
