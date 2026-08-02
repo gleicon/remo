@@ -63,23 +63,33 @@ async fn install(args: InstallArgs) -> Result<()> {
 
     println!("Installing remo on {}", args.domain);
 
-    // Create directory layout.
+    // Create directory layout. /etc/remo is 0o700 so the master_token is
+    // never readable by other accounts even before we set its permissions.
+    use std::os::unix::fs::DirBuilderExt;
     let data_dir = "/var/lib/remo";
     for dir in &[
         format!("{data_dir}/apps"),
         format!("{data_dir}/git"),
-        "/etc/remo".to_string(),
         "/var/log/remo".to_string(),
     ] {
         std::fs::create_dir_all(dir)?;
         println!("  created {dir}");
     }
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create("/etc/remo")?;
+    println!("  created /etc/remo");
 
-    // Generate master token.
+    // Generate master token — write atomically with 0o600 so there is no
+    // window between creation and permission tightening.
     let token = generate_token();
     let token_path = "/etc/remo/master_token";
-    std::fs::write(token_path, &token)?;
-    set_chmod_600(token_path)?;
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true).create(true).truncate(true).mode(0o600)
+            .open(token_path)?;
+        f.write_all(token.as_bytes())?;
+    }
 
     // Write server config.
     let cfg = ServerConfig {
@@ -172,8 +182,3 @@ fn generate_token() -> String {
     hex::encode(bytes)
 }
 
-fn set_chmod_600(path: &str) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}

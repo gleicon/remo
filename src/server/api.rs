@@ -28,6 +28,25 @@ fn validate_app_name(name: &str) -> ApiResult<()> {
     }
 }
 
+fn validate_entrypoint(ep: &str) -> ApiResult<()> {
+    // Relative paths only: safe filename chars per segment, no `..`, no leading slash.
+    let ok = !ep.is_empty()
+        && !ep.starts_with('/')
+        && !ep.contains('\0')
+        && ep.split('/').all(|seg| {
+            !seg.is_empty()
+                && seg != ".."
+                && seg.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        });
+    if ok {
+        Ok(())
+    } else {
+        Err(ApiError::Bad(
+            "entrypoint must be a relative path with safe components (no .., no leading /)".into(),
+        ))
+    }
+}
+
 fn validate_sha(sha: &str) -> ApiResult<()> {
     if sha.len() == 16 && sha.chars().all(|c| c.is_ascii_hexdigit()) {
         Ok(())
@@ -155,6 +174,7 @@ async fn apps_create(
     Json(body): Json<CreateAppBody>,
 ) -> ApiResult<(StatusCode, Json<AppResponse>)> {
     validate_app_name(&body.name)?;
+    validate_entrypoint(&body.entrypoint)?;
     if db::app_get(&state.pool, &body.name).await?.is_some() {
         return Err(ApiError::Conflict("app already exists".into()));
     }
