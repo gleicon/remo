@@ -1,0 +1,11 @@
+/Users/gleicon/code/rust/nano-rs/remo/target/debug/deps/either-51f685ffd056d77c.d: /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/lib.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/serde_untagged.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/serde_untagged_optional.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/iterator.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/into_either.rs
+
+/Users/gleicon/code/rust/nano-rs/remo/target/debug/deps/libeither-51f685ffd056d77c.rlib: /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/lib.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/serde_untagged.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/serde_untagged_optional.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/iterator.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/into_either.rs
+
+/Users/gleicon/code/rust/nano-rs/remo/target/debug/deps/libeither-51f685ffd056d77c.rmeta: /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/lib.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/serde_untagged.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/serde_untagged_optional.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/iterator.rs /Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/into_either.rs
+
+/Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/lib.rs:
+/Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/serde_untagged.rs:
+/Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/serde_untagged_optional.rs:
+/Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/iterator.rs:
+/Users/gleicon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.17.0/src/into_either.rs:

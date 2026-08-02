@@ -1,0 +1,156 @@
+// Tests for input validation functions extracted from server/api.rs.
+// These are pure-function tests — no DB, no network, no V8.
+
+// ── App name validation ───────────────────────────────────────────────────────
+
+fn validate_app_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 32
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+#[test]
+fn valid_app_names() {
+    for name in &["myapp", "my-app", "app123", "a", "x".repeat(32).as_str(), "hello-world-2"] {
+        assert!(validate_app_name(name), "expected '{name}' to be valid");
+    }
+}
+
+#[test]
+fn invalid_app_names() {
+    for (name, reason) in &[
+        ("", "empty"),
+        ("-myapp", "leading hyphen"),
+        ("myapp-", "trailing hyphen"),
+        ("MyApp", "uppercase"),
+        ("my_app", "underscore"),
+        ("my.app", "dot"),
+        ("my/app", "slash"),
+        ("my app", "space"),
+        (&"x".repeat(33), "too long (33 chars)"),
+        ("../etc/passwd", "path traversal"),
+        ("app\x00name", "null byte"),
+    ] {
+        assert!(!validate_app_name(name), "expected '{name}' ({reason}) to be invalid");
+    }
+}
+
+// ── SHA validation ───────────────���────────────────────────────────────────────
+
+fn validate_sha(sha: &str) -> bool {
+    sha.len() == 16 && sha.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+#[test]
+fn valid_shas() {
+    assert!(validate_sha("deadbeef01234567"));
+    assert!(validate_sha("0000000000000000"));
+    assert!(validate_sha("ffffffffffffffff"));
+    assert!(validate_sha("ABCDEF0123456789")); // uppercase hex also valid
+}
+
+#[test]
+fn invalid_shas() {
+    assert!(!validate_sha(""));
+    assert!(!validate_sha("deadbeef")); // too short
+    assert!(!validate_sha("deadbeef012345678")); // too long (17)
+    assert!(!validate_sha("deadbeefghijklmn")); // non-hex chars
+    assert!(!validate_sha("deadbeef/0123456")); // slash
+    assert!(!validate_sha("../etc/passwd000")); // path traversal
+}
+
+// ── safe_join (path segment traversal) ───────────────��───────────────────────
+
+fn safe_join_ok(base: &str, segment: &str) -> bool {
+    use std::path::{Component, Path};
+    for comp in Path::new(segment).components() {
+        match comp {
+            Component::Normal(_) => {}
+            _ => return false,
+        }
+    }
+    let joined = Path::new(base).join(segment);
+    joined.starts_with(base)
+}
+
+#[test]
+fn safe_join_valid() {
+    assert!(safe_join_ok("/var/lib/remo", "myapp"));
+    assert!(safe_join_ok("/var/lib/remo", "abc123"));
+    assert!(safe_join_ok("/var/lib/remo", "hello-world"));
+}
+
+#[test]
+fn safe_join_traversal_rejected() {
+    assert!(!safe_join_ok("/var/lib/remo", ".."));
+    assert!(!safe_join_ok("/var/lib/remo", "../etc/passwd"));
+    assert!(!safe_join_ok("/var/lib/remo", "app/../../etc"));
+    assert!(!safe_join_ok("/var/lib/remo", "/absolute/path"));
+}
+
+// ── Auth: constant-time comparison ────────────────���──────────────────────────
+
+fn constant_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.is_empty() || a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+#[test]
+fn constant_eq_matching() {
+    assert!(constant_eq(b"secret", b"secret"));
+    assert!(constant_eq(b"a", b"a"));
+}
+
+#[test]
+fn constant_eq_mismatch() {
+    assert!(!constant_eq(b"secret", b"secret!")); // different length
+    assert!(!constant_eq(b"secret", b"SECRET")); // case differs
+    assert!(!constant_eq(b"abc", b"abd")); // single byte differs
+    assert!(!constant_eq(b"", b"")); // empty not equal (prevents empty token auth)
+    assert!(!constant_eq(b"", b"nonempty"));
+}
+
+// ── Git hook: parse_app_name ────────────��─────────────────────���───────────────
+
+fn parse_app_name(ssh_cmd: &str) -> Option<String> {
+    let parts: Vec<&str> = ssh_cmd.split_whitespace().collect();
+    let raw = parts.get(1)?;
+    let name = raw.trim_matches('\'').trim_matches('"').trim_matches('/');
+
+    let ok = !name.is_empty()
+        && name.len() <= 32
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+
+    if ok { Some(name.to_string()) } else { None }
+}
+
+#[test]
+fn parse_app_name_normal() {
+    assert_eq!(parse_app_name("git-receive-pack 'myapp'"), Some("myapp".into()));
+    assert_eq!(parse_app_name("git-receive-pack \"my-app\""), Some("my-app".into()));
+}
+
+#[test]
+fn parse_app_name_strip_slashes() {
+    assert_eq!(parse_app_name("git-receive-pack '/myapp'"), Some("myapp".into()));
+}
+
+#[test]
+fn parse_app_name_injection_rejected() {
+    assert_eq!(parse_app_name("git-receive-pack 'app;rm -rf /'"), None);
+    assert_eq!(parse_app_name("git-receive-pack '../../../etc'"), None);
+    assert_eq!(parse_app_name("git-receive-pack 'app$(id)'"), None);
+    assert_eq!(parse_app_name("git-receive-pack ''"), None); // empty
+}
+
+#[test]
+fn parse_app_name_missing_arg() {
+    assert_eq!(parse_app_name("git-receive-pack"), None);
+    assert_eq!(parse_app_name(""), None);
+}
