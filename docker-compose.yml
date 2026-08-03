@@ -20,8 +20,8 @@ services:
     build:
       context: .
       args:
-        REMO_VERSION: v0.2.2
-        REMO_SHA256: b289d410b7e34712a0bd63d6dd400ad6f215f35e9176c8a43a86cb22b73e66c2
+        REMO_VERSION: v0.2.3
+        REMO_SHA256: 96859e6d3a5ca77df8f6f0e5a799a0a2f3f611484b570a3ffa059f56c3668cd4
     command: ["remo", "server", "start"]
     restart: unless-stopped
     depends_on:
