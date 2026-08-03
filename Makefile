@@ -42,13 +42,17 @@ bump:
 	perl -i -pe 's/REMO_SHA256: .*/REMO_SHA256: $(SHA256)/g' docker-compose.yml
 	@echo "Bumped to $(VERSION) (sha256=$(SHA256))"
 
-# Sync repo to VPS and rebuild remo containers from the pinned release binary.
+# Sync repo to VPS, rebuild remo container, and install remo binary on the host.
+# The host binary is used by the git user's forced command for git-push deploys.
 deploy:
 	rsync -avz --delete \
 	  --exclude=target/ --exclude=.git/ --exclude='*.db' \
 	  -e "ssh -i $(VPS_SSH_KEY) -o StrictHostKeyChecking=no" \
 	  . $(VPS_USER)@$(VPS_HOST):$(VPS_DIR)/
-	$(SSH) "cd $(VPS_DIR) && sudo docker compose build --pull remo remo-sshd && sudo docker compose up -d"
+	$(SSH) "cd $(VPS_DIR) && sudo docker compose build --pull remo && sudo docker compose up -d"
+	$(SSH) "VER=\$$(grep 'REMO_VERSION:' $(VPS_DIR)/docker-compose.yml | head -1 | awk '{print \$$2}') && \
+	  sudo wget -qO /usr/local/bin/remo https://github.com/gleicon/remo/releases/download/\$$VER/remo-linux-amd64 && \
+	  sudo chmod +x /usr/local/bin/remo && echo host binary updated to \$$VER"
 
 logs:
 	$(SSH) "cd $(VPS_DIR) && sudo docker compose logs -f remo"

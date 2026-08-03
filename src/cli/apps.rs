@@ -65,7 +65,7 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
         .split('/')
         .next()
         .unwrap_or(&base);
-    let remote_url = format!("ssh://git@{host}:2222/{}", args.name);
+    let remote_url = format!("git@{host}:{}", args.name);
 
     println!("Created: {}", app["hostname"].as_str().unwrap_or(&args.name));
 

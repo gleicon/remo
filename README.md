@@ -72,7 +72,7 @@ remo setup --invite <token>
 ```bash
 remo apps create myapp
 
-git remote add remo ssh://git@remo.example.com:2222/myapp
+git remote add remo git@remo.example.com:myapp
 git push remo main
 ```
 

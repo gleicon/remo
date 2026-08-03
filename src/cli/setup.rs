@@ -259,7 +259,7 @@ fn write_ssh_config_entry(server_url: &str) -> Result<()> {
     }
 
     let stanza = format!(
-        "\nHost {host}\n    Port 2222\n    User git\n    IdentityFile ~/.ssh/id_rsa_remo\n    IdentitiesOnly yes\n"
+        "\nHost {host}\n    User git\n    IdentityFile ~/.ssh/id_rsa_remo\n    IdentitiesOnly yes\n"
     );
     std::fs::write(&config_path, format!("{existing}{stanza}"))?;
     println!("Added ~/.ssh/config entry for {host}");
