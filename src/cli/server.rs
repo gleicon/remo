@@ -14,6 +14,15 @@ pub enum ServerCmd {
     Status,
     /// Assess VPS readiness and remo installation health
     Doctor,
+    /// Register an SSH public key for git push (run on VPS as root)
+    AddKey {
+        /// Username the key belongs to
+        #[arg(long)]
+        user: String,
+        /// SSH public key string (e.g. "ssh-ed25519 AAAA...")
+        #[arg(long)]
+        key: String,
+    },
 }
 
 #[derive(clap::Args)]
@@ -53,7 +62,19 @@ pub async fn run(cmd: ServerCmd) -> Result<()> {
         ServerCmd::Start(args) => server::start(args.port).await,
         ServerCmd::Status => status().await,
         ServerCmd::Doctor => doctor().await,
+        ServerCmd::AddKey { user, key } => add_key(user, key),
     }
+}
+
+fn add_key(user: String, key: String) -> Result<()> {
+    let key = key.trim();
+    if !key.starts_with("ssh-") && !key.starts_with("ecdsa-sk-") {
+        bail!("key must start with ssh- or ecdsa-sk-");
+    }
+    crate::server::api::write_authorized_key(&user, key)
+        .map_err(|e| anyhow::anyhow!("failed to write authorized_keys: {e}"))?;
+    println!("Added key for user '{user}' to /etc/remo/authorized_keys");
+    Ok(())
 }
 
 async fn install(args: InstallArgs) -> Result<()> {

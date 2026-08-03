@@ -55,6 +55,15 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
             value_enc   TEXT NOT NULL,
             PRIMARY KEY (app_id, key)
         );
+
+        CREATE TABLE IF NOT EXISTS invites (
+            id          TEXT PRIMARY KEY,
+            token_hash  TEXT NOT NULL UNIQUE,
+            username    TEXT NOT NULL,
+            email       TEXT,
+            expires_at  TEXT NOT NULL,
+            used_at     TEXT
+        );
         "#,
     )
     .execute(pool)
@@ -367,4 +376,68 @@ pub async fn env_unset(pool: &SqlitePool, app_id: &str, key: &str) -> Result<boo
         .await?
         .rows_affected();
     Ok(n > 0)
+}
+
+// ── Invite ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Invite {
+    pub id: String,
+    pub token_hash: String,
+    pub username: String,
+    pub email: Option<String>,
+    pub expires_at: DateTime<Utc>,
+    pub used_at: Option<DateTime<Utc>>,
+}
+
+pub async fn invite_create(pool: &SqlitePool, invite: &Invite) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO invites (id,token_hash,username,email,expires_at,used_at)
+         VALUES (?,?,?,?,?,?)",
+    )
+    .bind(&invite.id)
+    .bind(&invite.token_hash)
+    .bind(&invite.username)
+    .bind(&invite.email)
+    .bind(invite.expires_at.to_rfc3339())
+    .bind(invite.used_at.map(|t| t.to_rfc3339()))
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn invite_get_by_token_hash(pool: &SqlitePool, hash: &str) -> Result<Option<Invite>> {
+    let row = sqlx::query("SELECT * FROM invites WHERE token_hash=?")
+        .bind(hash)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(row_to_invite))
+}
+
+pub async fn invite_mark_used(pool: &SqlitePool, id: &str) -> Result<()> {
+    sqlx::query("UPDATE invites SET used_at=? WHERE id=?")
+        .bind(Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn invite_list(pool: &SqlitePool) -> Result<Vec<Invite>> {
+    let rows = sqlx::query("SELECT * FROM invites ORDER BY expires_at DESC")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(row_to_invite).collect())
+}
+
+fn row_to_invite(row: sqlx::sqlite::SqliteRow) -> Invite {
+    Invite {
+        id: row.get("id"),
+        token_hash: row.get("token_hash"),
+        username: row.get("username"),
+        email: row.get("email"),
+        expires_at: row.get::<String, _>("expires_at").parse().unwrap_or(Utc::now()),
+        used_at: row.get::<Option<String>, _>("used_at")
+            .and_then(|s| s.parse().ok()),
+    }
 }

@@ -23,6 +23,8 @@ enum Commands {
         #[command(subcommand)]
         cmd: cli::server::ServerCmd,
     },
+    /// Interactive first-time setup: generate SSH key, create user, configure client
+    Setup(cli::setup::SetupArgs),
     /// Authenticate CLI with a remo server
     Login(cli::login::LoginArgs),
     /// App management
@@ -69,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Server { cmd } => cli::server::run(cmd).await,
+        Commands::Setup(args) => cli::setup::run(args).await,
         Commands::Login(args) => cli::login::run(args).await,
         Commands::Apps { cmd } => cli::apps::run(cmd).await,
         Commands::Users { cmd } => cli::users::run(cmd).await,

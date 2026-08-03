@@ -82,79 +82,101 @@ Caddy uses on-demand TLS — no certbot needed, no per-app cert commands. Requir
 
 ## 3. Admin Laptop — First Login
 
-On the **operator's laptop**, log in with the master token printed by the installer:
-
-```bash
-remo login --server https://remo.apps.yourdomain.tld --token <master-token>
-```
-
-Config saved to `~/.remo/config.toml`. The master token grants full admin access — do not share it with developers.
-
-Create a developer account:
-
-```bash
-remo users add alice --pubkey "ssh-rsa AAAA...alice@laptop"
-```
-
-Output: a scoped token for Alice. Share it out-of-band (Slack, 1Password, etc.).
-
-Create a `git` user on the VPS (no shell, no home login):
-
-```bash
-adduser --system --shell /usr/sbin/nologin --no-create-home git
-```
-
-Add to `/etc/remo/authorized_keys` (the file was created by the installer, owned by `git`):
-
-```
-command="/usr/local/bin/remo git-hook --user alice" ssh-rsa AAAA...alice@laptop
-```
-
-Point sshd at it **only for the git user** in `/etc/ssh/sshd_config`. A global `AuthorizedKeysFile` directive replaces `~/.ssh/authorized_keys` for all users and will lock out admin SSH access — use a `Match` block:
-
-```
-Match User git
-    AuthorizedKeysFile /etc/remo/authorized_keys
-```
-
-Then `systemctl reload sshd`.
-
----
-
-## 4. Developer Laptop (Alice's machine)
-
-Build and install the binary (no published releases yet):
+Build and install the binary on your laptop:
 
 ```bash
 git clone https://github.com/gleicon/remo
 cd remo && cargo build --release
-cp target/release/remo /usr/local/bin/remo
+sudo cp target/release/remo /usr/local/bin/remo
 ```
 
-Log in with the scoped token the admin gave you:
+Run the interactive setup. It will create your user account, register your SSH key server-side, and configure `~/.remo/config.toml` and `~/.ssh/config`:
 
 ```bash
-remo login --server https://remo.apps.yourdomain.tld --token <alice-token>
+remo setup
 ```
 
-Config saved to `~/.remo/config.toml`.
+Prompts:
+1. Server URL — e.g. `https://cloud.remoapps.site`
+2. Setup as: `1` (Admin — master token)
+3. Master token — the one printed by `remo server install`
+4. Your username
+5. SSH key — generate a new one or use an existing key
+
+After this completes, `git push remo main` works.
+
+The master token grants full admin access. After setup, your CLI is configured with a scoped **user token** — you only need the master token again to create or revoke other users.
+
+---
+
+## 4. Inviting Users (Alice)
+
+Create a single-use invite link for Alice (expires in 1 hour by default):
+
+```bash
+remo users invite alice --email alice@example.com
+```
+
+Output:
+```
+Invite created for 'alice' (expires 2026-08-02T16:00:00Z)
+
+Send this command to the user (shown once):
+  remo setup --invite <token>
+```
+
+Send Alice the `remo setup --invite <token>` line. She runs it on her laptop:
+
+```bash
+# Install remo binary (same as above)
+remo setup --invite <token>
+```
+
+This:
+1. Validates the invite with the server
+2. Generates or picks her SSH key locally
+3. Registers her key server-side (written to `/etc/remo/authorized_keys`)
+4. Creates her account and saves her user token to `~/.remo/config.toml`
+
+The invite token is single-use and expires after 1 hour. If it expires before Alice uses it, create a new one with `remo users invite alice`.
+
+To extend the expiry window (e.g. 24 hours):
+
+```bash
+remo users invite alice --expires 86400
+```
+
+List pending invites:
+
+```bash
+remo users invites
+```
 
 ---
 
 ## 5. Deploy Your First App
 
 ```bash
-# Create the app on the server
-remo apps create myapp --type js --entrypoint index.js
+# Create the app record on the server
+remo apps create myapp
 
-# In your project directory
+# Write a minimal JS app
+cat > index.js << 'EOF'
+addEventListener("fetch", (e) =>
+  e.respondWith(new Response("hello from remo", { status: 200 }))
+);
+EOF
+
 git init
-git remote add remo git@remo.apps.yourdomain.tld:myapp
-git add -A && git commit -m "initial"
+git add index.js && git commit -m "initial"
+
+# Add the git remote — path is just /appname (server identifies you by SSH key)
+git remote add remo ssh://cloud.remoapps.site/myapp
+
 git push remo main
 ```
 
-Deployed app is live at `https://alice-myapp.apps.yourdomain.tld` (hostname is `{owner}-{name}.{domain}`).
+Deployed app is live at `https://alice-myapp.cloud.remoapps.site` (hostname is `{owner}-{name}.{domain}`).
 
 ---
 
@@ -221,10 +243,12 @@ Commit your `dist/` build output. remo maps the directory to nano-rs `StaticDir`
 ## 9. Multi-User Setup
 
 Each developer:
-1. Gets a user account: `remo users add <name> --pubkey <key>`
-2. Receives a scoped token (owns their own apps only)
-3. Runs `remo login` on their laptop
-4. Gets a forced-command SSH entry for git push
+1. Admin runs: `remo users invite <name> --email <email>`
+2. Admin sends the printed `remo setup --invite <token>` command to the developer
+3. Developer runs it on their laptop — account created, SSH key registered, client configured
+4. Developer can immediately `git push`
+
+No manual SSH key copying or authorized_keys editing required.
 
 ---
 

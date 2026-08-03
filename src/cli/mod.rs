@@ -6,4 +6,5 @@ pub mod git_hook;
 pub mod login;
 pub mod logs;
 pub mod server;
+pub mod setup;
 pub mod users;

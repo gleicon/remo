@@ -26,7 +26,7 @@ services:
     ports:
       - "127.0.0.1:7070:7070"
     volumes:
-      - /etc/remo:/etc/remo:ro
+      - /etc/remo:/etc/remo
       - /var/lib/remo:/var/lib/remo
 
   remo-sshd:
