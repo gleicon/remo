@@ -1,6 +1,6 @@
 FROM debian:bookworm-slim
 
-ARG REMO_VERSION=v0.1.0
+ARG REMO_VERSION=v0.2.0
 # Set REMO_SHA256 to the expected sha256sum of remo-linux-amd64 to verify integrity.
 # Leave empty to skip verification (dev/test only).
 ARG REMO_SHA256=""

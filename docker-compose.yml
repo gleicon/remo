@@ -17,7 +17,11 @@ services:
       retries: 3
 
   remo:
-    build: .
+    build:
+      context: .
+      args:
+        REMO_VERSION: v0.2.0
+        REMO_SHA256: 336b08bfe3e9d509349f4e4863646db8d7a1e01096235dc5accb504d515ea21c
     command: ["remo", "server", "start"]
     restart: unless-stopped
     depends_on:
@@ -30,7 +34,11 @@ services:
       - /var/lib/remo:/var/lib/remo
 
   remo-sshd:
-    build: .
+    build:
+      context: .
+      args:
+        REMO_VERSION: v0.2.0
+        REMO_SHA256: 336b08bfe3e9d509349f4e4863646db8d7a1e01096235dc5accb504d515ea21c
     command: >
       sh -c "
         if [ ! -f /etc/ssh/remo_host_keys/ssh_host_ed25519_key ]; then
