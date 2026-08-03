@@ -29,16 +29,7 @@ fn validate_app_name(name: &str) -> ApiResult<()> {
 }
 
 fn validate_entrypoint(ep: &str) -> ApiResult<()> {
-    // Relative paths only: safe filename chars per segment, no `..`, no leading slash.
-    let ok = !ep.is_empty()
-        && !ep.starts_with('/')
-        && !ep.contains('\0')
-        && ep.split('/').all(|seg| {
-            !seg.is_empty()
-                && seg != ".."
-                && seg.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-        });
-    if ok {
+    if crate::validation::is_valid_entrypoint(ep) {
         Ok(())
     } else {
         Err(ApiError::Bad(
@@ -85,14 +76,14 @@ async fn health() -> impl IntoResponse {
 pub fn user_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/apps", get(apps_list).post(apps_create))
-        .route("/api/apps/:name", get(apps_get).delete(apps_delete))
-        .route("/api/apps/:name/deployments", get(deployments_list))
-        .route("/api/apps/:name/rollback", post(apps_rollback))
-        .route("/api/apps/:name/scale", post(apps_scale))
-        .route("/api/apps/:name/env", get(env_list).post(env_set))
-        .route("/api/apps/:name/env/:key", delete(env_unset))
-        .route("/api/apps/:name/domain", put(domain_set).delete(domain_unset))
-        .route("/api/apps/:name/logs", get(logs_get))
+        .route("/api/apps/{name}", get(apps_get).delete(apps_delete))
+        .route("/api/apps/{name}/deployments", get(deployments_list))
+        .route("/api/apps/{name}/rollback", post(apps_rollback))
+        .route("/api/apps/{name}/scale", post(apps_scale))
+        .route("/api/apps/{name}/env", get(env_list).post(env_set))
+        .route("/api/apps/{name}/env/{key}", delete(env_unset))
+        .route("/api/apps/{name}/domain", put(domain_set).delete(domain_unset))
+        .route("/api/apps/{name}/logs", get(logs_get))
 }
 
 // ── Admin routes (master token or is_admin user) ──────────────────────────────
@@ -100,7 +91,7 @@ pub fn user_routes() -> Router<Arc<AppState>> {
 pub fn admin_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/users", get(users_list).post(users_create))
-        .route("/api/users/:name", delete(users_delete))
+        .route("/api/users/{name}", delete(users_delete))
 }
 
 // ── App handlers ──────────────────────────────────────────────────────────────
@@ -279,7 +270,7 @@ async fn apps_rollback(
     std::fs::rename(&tmp, &link).map_err(|e| ApiError::Internal(e.to_string()))?;
 
     db::app_set_sha(&state.pool, &name, &target_sha).await?;
-    let nano = crate::nano_client::NanoClient::new(&state.cfg.nano_socket);
+    let nano = crate::nano_client::NanoClient::from_config(&state.cfg);
     nano.reload_app(&app.hostname).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -296,7 +287,7 @@ async fn apps_scale(
     validate_app_name(&name)?;
     let app = db::app_get(&state.pool, &name).await?.ok_or(ApiError::NotFound)?;
     check_ownership(&auth, &app.owner)?;
-    let nano = crate::nano_client::NanoClient::new(&state.cfg.nano_socket);
+    let nano = crate::nano_client::NanoClient::from_config(&state.cfg);
     nano.scale_app(&app.hostname, body.workers).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -335,7 +326,7 @@ async fn env_set(
         let enc = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, v);
         db::env_set(&state.pool, &name, k, &enc).await?;
     }
-    let nano = crate::nano_client::NanoClient::new(&state.cfg.nano_socket);
+    let nano = crate::nano_client::NanoClient::from_config(&state.cfg);
     let pairs: Vec<_> = body.vars.into_iter().collect();
     nano.set_env(&app.hostname, pairs).await
         .map_err(|e| ApiError::Internal(format!("nano-rs rejected env update: {e}")))?;
@@ -353,7 +344,7 @@ async fn env_unset(
     db::env_unset(&state.pool, &name, &key).await?;
     // Apply remaining DB env to the running worker so the deleted key is removed immediately.
     let remaining = db::env_list_decoded(&state.pool, &name).await?;
-    let nano = crate::nano_client::NanoClient::new(&state.cfg.nano_socket);
+    let nano = crate::nano_client::NanoClient::from_config(&state.cfg);
     nano.set_env(&app.hostname, remaining.into_iter().collect()).await
         .map_err(|e| ApiError::Internal(format!("nano-rs rejected env update: {e}")))?;
     Ok(StatusCode::NO_CONTENT)

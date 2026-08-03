@@ -71,7 +71,7 @@ async fn run_deploy(app_name: String, sha: String, deployer: String) -> Result<(
         .ok_or_else(|| anyhow::anyhow!("app '{app_name}' not found"))?;
 
     let server_cfg = crate::config::ServerConfig::load()?;
-    let nano_client = crate::nano_client::NanoClient::new(&server_cfg.nano_socket);
+    let nano_client = crate::nano_client::NanoClient::from_config(&server_cfg);
 
     // Export the committed tree as a tar archive.
     let git_dir = format!("{data_dir}/git/{app_name}.git");
@@ -135,15 +135,22 @@ fn init_bare_repo(git_dir: &str, app_name: &str, _data_dir: &str) -> Result<()> 
 
     // Hook is fully static — no user-controlled data interpolated.
     // App name is derived server-side from $GIT_DIR basename, never from the push.
+    // Use the absolute path of the current executable so the git user's restricted
+    // PATH doesn't have to include /usr/local/bin.
+    let remo_bin = std::env::current_exe()
+        .unwrap_or_else(|_| std::path::PathBuf::from("/usr/local/bin/remo"))
+        .to_string_lossy()
+        .into_owned();
     let hook_path = format!("{git_dir}/hooks/post-receive");
-    let hook = r#"#!/bin/sh
-# remo post-receive — DO NOT EDIT (managed by remo)
-APP=$(basename "${GIT_DIR}" .git)
-while read oldrev newrev ref; do
-    remo git-hook --user "${REMO_USER}" --deploy "${APP}" --sha "${newrev}"
-done
-"#;
-    std::fs::write(&hook_path, hook)?;
+    let hook = format!(
+        "#!/bin/sh\n\
+         # remo post-receive — DO NOT EDIT (managed by remo)\n\
+         APP=$(basename \"${{GIT_DIR}}\" .git)\n\
+         while read oldrev newrev ref; do\n\
+             {remo_bin} git-hook --user \"${{REMO_USER}}\" --deploy \"${{APP}}\" --sha \"${{newrev}}\"\n\
+         done\n"
+    );
+    std::fs::write(&hook_path, hook.as_bytes())?;
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755))?;
 

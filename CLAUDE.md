@@ -41,15 +41,20 @@ VPS
 | `src/nano_client.rs` | HTTP client to nano-rs admin API; `is_not_found()` |
 | `src/deploy/mod.rs` | `DeployContext`, `run()`, prune logic |
 | `src/cli/git_hook.rs` | SSH forced-command handler + post-receive deploy |
-| `src/validation.rs` | `is_valid_app_name()` — shared by api.rs and git_hook.rs |
+| `src/validation.rs` | `is_valid_app_name()`, `is_valid_entrypoint()` — shared validators |
 | `src/proxy/` | `ProxyBackend` trait + nginx/Caddy stubs (not yet wired) |
-| `docs/DESIGN.md` | Architecture decisions and full API surface |
-| `GRILL.md` | Raw `/ds-grill-me` decision log |
+| `docs/DESIGN.md` | Architecture, API surface, extension points |
 | `.project/PLAN.md` | Task roadmap with phase status |
 
 ## Token auth
 
 SHA-256 only (no bcrypt). `sha256_hex(raw_token)` stored in `users.token_hash`. Lookup is O(1) by hash. Master token (admin) is constant-time compared in `auth.rs`. `sha256_hex` is `pub` — call it from api.rs for user creation.
+
+## Master token file
+
+`/etc/remo/master_token` is written atomically with `OpenOptions::mode(0o600)` — the permission is set at `open()` time, so there is never a window where the file exists but is world-readable. Do not simplify this to `fs::write` + `chmod` — that two-step has a TOCTOU race.
+
+`/etc/remo` itself is `0o700` (owner-execute only). This means even before per-file permissions are set, no other account can stat or open files inside the directory. On `--reinit`, `set_permissions` is called unconditionally after `DirBuilder::create` to enforce the mode even if the directory already existed with looser permissions.
 
 ## Env pipeline
 
@@ -59,10 +64,13 @@ Vars stored base64-encoded in `env_vars` table. `env_list_decoded()` decodes on 
 
 `{owner}-{name}.{domain}` — enforced at app create. Prevents two users from squatting the same subdomain. Custom CNAME in `custom_domain` column. `PUT /api/apps/:name/domain` sets it; `DELETE` clears. Proxy layer must serve both (not yet implemented).
 
+## Deploy limits
+
+`MAX_DEPLOY_BYTES` in `src/deploy/mod.rs` caps the tar archive at 10 MB. Checked before SHA hashing or disk I/O — user gets a clear error at `git push`. Recompile to change. nano-rs should carry its own higher ceiling (defense-in-depth) as a separate compile-time constant; remo is the policy layer.
+
 ## What's not done yet (production gaps)
 
 - Proxy config generation (nginx vhost / Caddy config written on app create/delete/domain change)
-- `remo server install` CLI implementation
 - Deployment rows written to DB on git-push
 - `nano.json` parsed in deploy hook for app_type/entrypoint override
 - Systemd unit generation
@@ -78,7 +86,7 @@ cargo build
 cargo test
 
 # run server (needs nano-rs running + /etc/remo/server.toml)
-cargo run -- server run
+cargo run -- server start
 ```
 
 Config at `/etc/remo/server.toml`:
@@ -89,4 +97,3 @@ nano_socket = "http://127.0.0.1:9000"
 bind = "127.0.0.1:7070"
 ```
 
-Master token at `/etc/remo/master_token` (chmod 600).

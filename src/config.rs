@@ -32,13 +32,38 @@ impl ClientConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub domain: String,
     pub data_dir: String,
     pub nano_socket: String,
+    /// API key sent as X-Admin-Key to nano-rs admin API.
+    /// Must match NANO_ADMIN_API_KEY in the nano-rs environment.
+    pub nano_admin_key: Option<String>,
     pub proxy: ProxyBackend,
     pub control_port: u16,
+    /// Bind address for the control plane. Use 0.0.0.0 in Docker (port
+    /// security enforced by the host-side Docker port binding).
+    #[serde(default = "default_bind_addr")]
+    pub bind_addr: String,
+}
+
+fn default_bind_addr() -> String {
+    "127.0.0.1".to_string()
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            domain: Default::default(),
+            data_dir: Default::default(),
+            nano_socket: Default::default(),
+            nano_admin_key: None,
+            proxy: Default::default(),
+            control_port: 7070,
+            bind_addr: default_bind_addr(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, clap::ValueEnum)]

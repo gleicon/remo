@@ -1,0 +1,23 @@
+# remo SSH container — git push only, no interactive login.
+Port 22
+ListenAddress 0.0.0.0
+
+HostKey /etc/ssh/remo_host_keys/ssh_host_ed25519_key
+
+# Only the git user may connect.
+AllowUsers git
+
+# No interactive shell, no forwarding — global section.
+PermitRootLogin no
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+PrintMotd no
+
+# Match block must be last; only per-user directives allowed inside it.
+# Per-user authorized_keys is bind-mounted from /etc/remo on the host.
+# Each key entry must include command="remo git-hook --user <username>" prefix.
+Match User git
+    AuthorizedKeysFile /etc/remo/authorized_keys

@@ -1,113 +1,90 @@
-# remo Design
+# remo Architecture
 
-Extracted from `/ds-grill-me` design session. See `GRILL.md` for full decision log.
-
-## What It Is
-
-Single-VPS edge PaaS for JS, WASM, and static HTML apps built on nano-rs.
-
-- Deploy: `git push remo main`
-- Live: `https://myapp.apps.yourdomain.tld`
-- No Kubernetes, no Docker, no build server
-
-## Architecture
+## Data flow
 
 ```
-laptop
-  git push
-    │
-    ▼ SSH (forced command)
-  remo git-hook --user alice
-    │
-    ├─ auth (user owns app?)
-    ├─ exec git-receive-pack <bare-repo>
-    └─ post-receive: remo git-hook --deploy myapp --sha <sha>
-                          │
-                          ├─ git archive → tar bytes
-                          ├─ extract to deploys/<sha>/
-                          ├─ symlink swap: current/ → deploys/<sha>/
-                          └─ nano admin API: create/update + reload
+git push remo main
+  │
+  SSH (forced command: remo git-hook --user <name>)
+    ├── auth: does this user own the app?
+    ├── exec git-receive-pack <bare-repo at /var/lib/remo/git/<app>.git>
+    └── post-receive trigger
+          ├── git archive → tar bytes
+          ├── size check (MAX_DEPLOY_BYTES = 10 MB)
+          ├── content-addressed extract → /var/lib/remo/apps/<app>/deploys/<sha>/
+          ├── atomic symlink: current/ → deploys/<sha>/
+          └── nano-rs admin API: update (or create on first deploy) + reload
 
-VPS
-  nginx / Caddy  :443  ──▶  nano-rs  :8080  (Host header routing)
-  remo control   :7070      (localhost only)
-  nano-rs admin  :9000      (localhost only)
+HTTP request
+  │
+  nginx/Caddy :443 (Host header routing)
+    └── nano-rs :8080 (data plane, routes by hostname)
+
+remo CLI
+  └── HTTP → remo control plane :7070 (Bearer token auth)
+        └── SQLite /var/lib/remo/state.db
 ```
 
-## Key Decisions
+## Ports
 
-| Decision | Choice | Reason |
-|----------|--------|--------|
-| Binary count | 1 (`remo`) | Single install, single upgrade |
-| App routing | nano-rs by Host header | Already works; proxy is TLS-only |
-| Proxy | nginx default, Caddy opt-in | nginx standard on Ubuntu |
-| TLS | certbot per-app (nginx) / on-demand (Caddy) | No DNS API token needed |
-| State | SQLite `/var/lib/remo/state.db` | Zero infra, Postgres-compatible schema |
-| Deploy artifact | content-addressed tar, symlink swap | Atomic, free rollback |
-| Env vars | encrypted at rest, Nano.env in V8 | Completion of existing AppConfig field |
-| Build step | none | Users commit built output |
-| Static sites | nano-rs StaticDir handler | No new infra |
-| Multi-node | SQLite `nodes` table now, swap driver later | Schema stable |
-| Auth (git) | SSH forced command per key | No extra server |
-| Auth (CLI) | Bearer token, admin=master, users=scoped | Simple, auditable |
+| Port   | Service               | Exposure        |
+|--------|-----------------------|-----------------|
+| 80/443 | nginx / Caddy         | public          |
+| 8080   | nano-rs data plane    | localhost only  |
+| 9000   | nano-rs admin API     | localhost only  |
+| 7070   | remo control plane    | localhost only  |
 
-## nano-rs Change Required
-
-One addition: wire `Nano.env` in the V8 runtime.
-
-`env_vars: HashMap<String, String>` already exists in `AppConfig` but is never injected into the JS context. Adding ~20 lines to `src/runtime/web_apis.rs` would expose `globalThis.Nano.env` as a read-only frozen object.
-
-This is the only nano-rs source change remo requires. Everything else goes through the existing admin HTTP API.
-
-## Directory Layout
+## Directory layout
 
 ```
 /var/lib/remo/
 ├── state.db
-├── apps/
-│   └── myapp/
-│       ├── git/           (bare repo — managed by remo, not nano-rs)
-│       ├── deploys/
-│       │   ├── abc123/    (extracted tar)
-│       │   └── def456/
-│       └── current -> deploys/abc123/
+├── git/
+│   └── myapp.git/          (bare repo, managed by remo)
+└── apps/
+    └── myapp/
+        ├── deploys/
+        │   ├── abc123ef/   (extracted tar, content-addressed SHA prefix)
+        │   └── def456ab/
+        └── current -> deploys/abc123ef/   (atomic symlink)
+
 /etc/remo/
 ├── server.toml
-└── master_token           (chmod 600)
+├── master_token            (0o600, written atomically — never chmod after write)
+└── authorized_keys         (SSH forced-command entries)
 ```
 
-## URL / Hostname Scheme
+## Hostname scheme
 
-Canonical hostname: `{owner}-{name}.{domain}`  
-Example: `alice-myapp.apps.yourdomain.tld`
+Canonical: `{owner}-{name}.{domain}` (e.g. `alice-myapp.apps.yourdomain.tld`)
 
-Owner prefix prevents subdomain squatting — two users can each have an app named `api` without conflict.
-
-Custom CNAME: store `custom_domain` on the app row. The proxy serves both the canonical hostname and the custom domain. Users set it via `PUT /api/apps/:name/domain`; point their DNS CNAME at the canonical hostname.
+Owner prefix is enforced at app create — two users can each have an app named `api` without conflict. Optional custom CNAME stored in `custom_domain` column; proxy must serve both. Set via `PUT /api/apps/:name/domain`.
 
 ## Control Plane API
 
+All endpoints require `Authorization: Bearer <token>`. Admin endpoints require the master token or an `is_admin` user.
+
 ```
-GET    /health                           public
-GET    /api/apps                         list apps (own, or all if admin)
-POST   /api/apps                         create app
-GET    /api/apps/:name                   app detail
-DEL    /api/apps/:name                   delete app
-GET    /api/apps/:name/deployments       deployment history
-POST   /api/apps/:name/rollback          roll back to previous/named sha
-POST   /api/apps/:name/scale             set worker count
-GET    /api/apps/:name/env               list env keys (values masked)
-POST   /api/apps/:name/env               set env vars (body: {vars:{k:v}})
-DEL    /api/apps/:name/env/:key          unset env var
-PUT    /api/apps/:name/domain            set custom domain (body: {domain:"..."})
-DEL    /api/apps/:name/domain            clear custom domain
-GET    /api/apps/:name/logs              deployment logs
-GET    /api/users                        (admin only)
-POST   /api/users                        (admin only)
-DEL    /api/users/:name                  (admin only)
+GET    /health                            public
+GET    /api/apps                          list apps (own only, or all if admin)
+POST   /api/apps                          create app  {name, type, entrypoint}
+GET    /api/apps/:name                    app detail
+DELETE /api/apps/:name                    delete app
+GET    /api/apps/:name/deployments        deployment history
+POST   /api/apps/:name/rollback           roll back  {sha?}
+POST   /api/apps/:name/scale              set workers  {workers}
+GET    /api/apps/:name/env                list env keys (values masked)
+POST   /api/apps/:name/env                set env vars  {vars: {k: v}}
+DELETE /api/apps/:name/env/:key           unset env var
+PUT    /api/apps/:name/domain             set custom domain  {domain}
+DELETE /api/apps/:name/domain             clear custom domain
+GET    /api/apps/:name/logs               deployment log output
+GET    /api/users                         (admin)
+POST   /api/users                         (admin)  {name, ssh_pubkey?}
+DELETE /api/users/:name                   (admin)
 ```
 
-### AppResponse shape
+`AppResponse` shape:
 
 ```json
 {
@@ -116,8 +93,35 @@ DEL    /api/users/:name                  (admin only)
   "owner":        "alice",
   "app_type":     "js",
   "entrypoint":   "index.js",
-  "current_sha":  "abc123...",
-  "custom_domain": "myapp.example.com",
-  "created_at":   "2026-07-31T00:00:00Z"
+  "current_sha":  "abc123ef",
+  "custom_domain": null,
+  "created_at":   "2026-08-01T00:00:00Z"
 }
 ```
+
+## Extending remo
+
+### Add a new proxy backend
+
+1. Add a variant to `ProxyBackend` enum in `src/config.rs`.
+2. Create `src/proxy/<name>.rs` implementing the `ProxyBackend` trait (`src/proxy/mod.rs`).
+3. Wire the variant in `src/cli/server.rs` → `write_proxy_config()`.
+4. Call `write_vhost()` / `delete_vhost()` from `apps_create` / `apps_delete` in `src/server/api.rs` (not yet wired for any backend).
+
+### Add a new CLI subcommand
+
+1. Add a file `src/cli/<name>.rs` with a `pub async fn run(...)`.
+2. Add a variant to `Commands` in `src/main.rs` and dispatch it.
+3. For server-side operations, add an HTTP handler in `src/server/api.rs` and register the route in `src/server/mod.rs`.
+
+### Add a new nano-rs admin API call
+
+Add a method to `NanoClient` in `src/nano_client.rs`. The client talks to `http://127.0.0.1:9000` (configurable via `server.toml`).
+
+### Change deploy behavior
+
+`src/deploy/mod.rs` → `run()` is the entry point. Called from `src/cli/git_hook.rs` after `git archive` completes. `DeployContext` carries app metadata and env vars. `MAX_DEPLOY_BYTES` (compile-time) is the size gate before any disk I/O.
+
+### Add per-app resource limits
+
+`CreateAppRequest` in `src/nano_client.rs` has `cpu_time_ms` and `memory_mb` fields already sent to nano-rs. Store limits in a new DB column, populate from `nano.json` (parsed in `git_hook.rs` — not yet implemented), and pass through `DeployContext`.

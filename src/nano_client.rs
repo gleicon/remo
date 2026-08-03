@@ -10,10 +10,27 @@ pub struct NanoClient {
 
 impl NanoClient {
     pub fn new(base_url: impl Into<String>) -> Self {
+        Self::new_with_key(base_url, None::<String>)
+    }
+
+    pub fn new_with_key(base_url: impl Into<String>, api_key: Option<impl Into<String>>) -> Self {
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Some(key) = api_key {
+            let key_str = key.into();
+            if !key_str.is_empty() {
+                if let Ok(val) = reqwest::header::HeaderValue::from_str(&key_str) {
+                    headers.insert("X-Admin-Key", val);
+                }
+            }
+        }
         Self {
             base: base_url.into().trim_end_matches('/').to_string(),
-            client: Client::new(),
+            client: Client::builder().default_headers(headers).build().unwrap_or_default(),
         }
+    }
+
+    pub fn from_config(cfg: &crate::config::ServerConfig) -> Self {
+        Self::new_with_key(&cfg.nano_socket, cfg.nano_admin_key.as_deref())
     }
 
     // ── App CRUD ──────────────────────────────────────────────────────────
@@ -31,7 +48,7 @@ impl NanoClient {
     pub async fn update_app(&self, hostname: &str, req: &UpdateAppRequest) -> Result<()> {
         let res = self
             .client
-            .put(format!("{}/admin/apps/{hostname}", self.base))
+            .patch(format!("{}/admin/apps/{hostname}", self.base))
             .json(req)
             .send()
             .await?;
@@ -81,11 +98,11 @@ impl NanoClient {
         let env: std::collections::HashMap<_, _> = vars.into_iter().collect();
         let res = self
             .client
-            .put(format!("{}/admin/apps/{hostname}", self.base))
+            .patch(format!("{}/admin/apps/{hostname}", self.base))
             .json(&UpdateAppRequest {
                 env_vars: Some(env),
-                script: None,
-                workers: None,
+                entrypoint: None,
+                limits: None,
             })
             .send()
             .await?;
@@ -110,19 +127,37 @@ pub fn is_not_found(e: &anyhow::Error) -> bool {
 
 // ── Request shapes ────────────────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateAppRequest {
-    pub hostname: String,
-    pub script: String,
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct AppLimits {
     pub workers: u32,
-    pub cpu_time_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_mb: Option<u64>,
-    pub env_vars: Option<std::collections::HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct CreateAppRequest {
+    pub hostname: String,
+    /// Absolute path to the JS entrypoint file, accessible to nano-rs.
+    pub entrypoint: String,
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub env_vars: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub limits: AppLimits,
+    /// Immediately activate the app (skip pending phase).
+    #[serde(default = "bool_true")]
+    pub activate: bool,
+}
+
+fn bool_true() -> bool { true }
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateAppRequest {
-    pub script: Option<String>,
-    pub workers: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entrypoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub env_vars: Option<std::collections::HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<AppLimits>,
 }

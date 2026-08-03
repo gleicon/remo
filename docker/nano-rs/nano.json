@@ -1,0 +1,14 @@
+{
+  "apps": [
+    {
+      "hostname": "placeholder.cloud.remoapps.site",
+      "entrypoint": "index.js",
+      "vfs_backend": "disk",
+      "vfs_disk": { "base_path": "/etc/nano-rs/placeholder" }
+    }
+  ],
+  "server": {
+    "port": 8080,
+    "host": "0.0.0.0"
+  }
+}

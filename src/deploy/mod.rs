@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use crate::nano_client::{CreateAppRequest, NanoClient, UpdateAppRequest};
 
 pub const KEEP_DEPLOYS: usize = 5;
+/// Maximum deploy archive size. Recompile to change for your VPS class.
+pub const MAX_DEPLOY_BYTES: usize = 10 * 1024 * 1024; // 10 MB
 
 #[derive(Debug, Clone)]
 pub struct DeployContext {
@@ -21,6 +23,14 @@ pub struct DeployContext {
 /// Extract a tar archive from the git archive pipe into a content-addressed
 /// directory, swap the `current/` symlink, and hot-reload nano-rs.
 pub async fn run(ctx: &DeployContext, tar_bytes: Vec<u8>) -> Result<String> {
+    anyhow::ensure!(
+        tar_bytes.len() <= MAX_DEPLOY_BYTES,
+        "deploy archive too large: {} bytes (limit {} bytes / {} MB)",
+        tar_bytes.len(),
+        MAX_DEPLOY_BYTES,
+        MAX_DEPLOY_BYTES / 1024 / 1024,
+    );
+
     let sha = content_sha(&tar_bytes);
     let deploy_dir = ctx.data_dir.join("apps").join(&ctx.app_name).join("deploys").join(&sha);
 
@@ -89,21 +99,18 @@ async fn prune_old_deploys(app_name: &str, data_dir: &Path) -> Result<()> {
 }
 
 async fn reload_nano(ctx: &DeployContext, entrypoint: &Path) -> Result<()> {
-    let script = std::fs::read_to_string(entrypoint)
-        .with_context(|| format!("read entrypoint {}", entrypoint.display()))?;
+    let entrypoint_str = entrypoint.to_string_lossy().into_owned();
+    let env: std::collections::HashMap<_, _> = ctx.env_vars.clone();
 
-    let env = if ctx.env_vars.is_empty() { None } else { Some(ctx.env_vars.clone()) };
-
-    // Try reload (app exists in nano-rs); fall back to create only on 404 (first deploy).
-    // Any other error (auth, 5xx, network) is propagated — do not mask real failures.
+    // Try reload (app already registered in nano-rs); fall back to create on 404 (first deploy).
     let update = ctx
         .nano_client
         .update_app(
             &ctx.hostname,
             &UpdateAppRequest {
-                script: Some(script.clone()),
-                workers: None,
-                env_vars: env.clone(),
+                entrypoint: Some(entrypoint_str.clone()),
+                env_vars: if env.is_empty() { None } else { Some(env.clone()) },
+                limits: None,
             },
         )
         .await;
@@ -114,11 +121,10 @@ async fn reload_nano(ctx: &DeployContext, entrypoint: &Path) -> Result<()> {
             ctx.nano_client
                 .create_app(&CreateAppRequest {
                     hostname: ctx.hostname.clone(),
-                    script,
-                    workers: 2,
-                    cpu_time_ms: None,
-                    memory_mb: None,
+                    entrypoint: entrypoint_str,
                     env_vars: env,
+                    limits: crate::nano_client::AppLimits { workers: 2, ..Default::default() },
+                    activate: true,
                 })
                 .await?;
         }

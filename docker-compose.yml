@@ -1,0 +1,54 @@
+services:
+  nano-rs:
+    build: ./docker/nano-rs
+    restart: unless-stopped
+    # No --config flag: starts with empty registry + admin API on :8889.
+    # remo pushes app registrations via admin API after each deploy.
+    command: ["nano-rs", "run"]
+    environment:
+      NANO_ADMIN_API_KEY: "${NANO_ADMIN_API_KEY}"
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8889:8889"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health | grep -q healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  remo:
+    build: .
+    command: ["remo", "server", "start"]
+    restart: unless-stopped
+    depends_on:
+      nano-rs:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:7070:7070"
+    volumes:
+      - /etc/remo:/etc/remo:ro
+      - /var/lib/remo:/var/lib/remo
+
+  remo-sshd:
+    build: .
+    command: >
+      sh -c "
+        if [ ! -f /etc/ssh/remo_host_keys/ssh_host_ed25519_key ]; then
+          ssh-keygen -t ed25519 -f /etc/ssh/remo_host_keys/ssh_host_ed25519_key -N '';
+        fi &&
+        cp /docker/sshd/sshd_config /etc/ssh/sshd_config.remo &&
+        /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config.remo
+      "
+    restart: unless-stopped
+    depends_on:
+      - remo
+    ports:
+      - "0.0.0.0:2222:22"
+    volumes:
+      - /etc/remo:/etc/remo:ro
+      - /var/lib/remo:/var/lib/remo
+      - ./docker/sshd/sshd_config:/docker/sshd/sshd_config:ro
+      - remo_sshd_host_keys:/etc/ssh/remo_host_keys
+
+volumes:
+  remo_sshd_host_keys:

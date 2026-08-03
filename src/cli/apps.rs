@@ -21,7 +21,7 @@ pub struct CreateArgs {
     pub name: String,
 
     /// App type: js | wasm | static
-    #[arg(long, default_value = "js")]
+    #[arg(long = "type", default_value = "js")]
     pub app_type: String,
 
     /// Entry point (e.g. index.js or index.wasm)

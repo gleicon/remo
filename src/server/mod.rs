@@ -27,6 +27,7 @@ pub async fn start(port: u16) -> Result<()> {
         tracing::warn!("master_token is empty — /etc/remo/master_token missing or blank; admin auth is disabled");
     }
 
+    let bind_addr = cfg.bind_addr.clone();
     let state = Arc::new(AppState { pool, cfg, master_token });
 
     let app = Router::new()
@@ -51,7 +52,7 @@ pub async fn start(port: u16) -> Result<()> {
         )
         .with_state(state);
 
-    let addr = format!("127.0.0.1:{port}");
+    let addr = format!("{bind_addr}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("remo control plane listening on {addr}");
     axum::serve(listener, app).await?;

@@ -37,7 +37,44 @@ fn invalid_app_names() {
     }
 }
 
-// ── SHA validation ───────────────���────────────────────────────────────────────
+// ── Entrypoint validation ─────────────────────────────────────────────────────
+
+fn is_valid_entrypoint(ep: &str) -> bool {
+    !ep.is_empty()
+        && !ep.starts_with('/')
+        && !ep.contains('\0')
+        && ep.split('/').all(|seg| {
+            !seg.is_empty()
+                && seg != ".."
+                && seg.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        })
+}
+
+#[test]
+fn valid_entrypoints() {
+    for ep in &["index.js", "dist/main.js", "src/app.js", "a", "my-app_v2.js"] {
+        assert!(is_valid_entrypoint(ep), "expected '{ep}' to be valid");
+    }
+}
+
+#[test]
+fn invalid_entrypoints() {
+    for (ep, reason) in &[
+        ("", "empty"),
+        ("/index.js", "leading slash"),
+        ("../index.js", "dot-dot traversal"),
+        ("a/../index.js", "dot-dot mid-path"),
+        ("a//b.js", "empty segment"),
+        ("index.js\x00evil", "null byte"),
+        ("index js", "space in name"),
+        ("../../../etc/passwd", "full traversal"),
+        ("/absolute/path", "absolute path"),
+    ] {
+        assert!(!is_valid_entrypoint(ep), "expected '{ep}' ({reason}) to be invalid");
+    }
+}
+
+// ── SHA validation ────────────────────────────────────────────────────────────
 
 fn validate_sha(sha: &str) -> bool {
     sha.len() == 16 && sha.chars().all(|c| c.is_ascii_hexdigit())
