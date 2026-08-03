@@ -21,25 +21,24 @@ git add -p
 git commit -m "feat: ..."
 git push
 
-make release VERSION=v0.2.1
+make tag VERSION=v1.2.3       # create local tag
+make tag-push VERSION=v1.2.3  # push → CI builds linux/amd64 binary (~2 min)
 ```
 
-This pushes the tag. GitHub Actions (`.github/workflows/release.yml`) picks it up,
-builds `remo-linux-amd64` for linux/amd64, and publishes it as a release asset
-along with a `remo-linux-amd64.sha256` file.
+GitHub Actions (`.github/workflows/release.yml`) builds a static `remo-linux-amd64` binary and publishes it with a SHA256 file.
 
-Monitor: https://github.com/gleicon/remo/actions (~2 minutes)
+Monitor: https://github.com/gleicon/remo/actions
 
 ### 2. Update the pinned version in docker-compose.yml
 
-Once the CI release is done:
+Once CI is done:
 
 ```bash
-make update-sha VERSION=v0.2.1
+make bump VERSION=v1.2.3
 # patches REMO_VERSION and REMO_SHA256 in docker-compose.yml
 
 git add docker-compose.yml
-git commit -m "chore: bump remo to v0.2.1"
+git commit -m "chore: bump remo to v1.2.3"
 git push
 ```
 
