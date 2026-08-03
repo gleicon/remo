@@ -65,9 +65,36 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
         .split('/')
         .next()
         .unwrap_or(&base);
+    let remote_url = format!("ssh://git@{host}:2222/{}", args.name);
+
     println!("Created: {}", app["hostname"].as_str().unwrap_or(&args.name));
-    println!("Remote:  git remote add remo ssh://git@{host}:2222/{}", args.name);
-    println!("Push:    git push remo main");
+
+    // If we're inside a git repo, add the remote automatically.
+    let in_git = std::process::Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if in_git {
+        let added = std::process::Command::new("git")
+            .args(["remote", "add", "remo", &remote_url])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if added {
+            println!("Remote:  added 'remo' → {remote_url}");
+            println!("Push:    git push remo main");
+        } else {
+            println!("Remote:  {remote_url}  (remote 'remo' already exists — skipped)");
+        }
+    } else {
+        println!("Remote:  git remote add remo {remote_url}");
+        println!("Push:    git push remo main");
+    }
+
     Ok(())
 }
 
