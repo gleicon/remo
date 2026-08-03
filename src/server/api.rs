@@ -619,7 +619,9 @@ pub fn write_authorized_key(username: &str, pubkey: &str) -> std::io::Result<()>
             "invalid ssh public key",
         ));
     }
-    let path = std::path::Path::new("/etc/remo/authorized_keys");
+    // /etc/remo is 0700 (root-only traversal by design).
+    // /var/lib/remo is world-traversable so sshd can read as the git user.
+    let path = std::path::Path::new("/var/lib/remo/authorized_keys");
     if path.exists() {
         let existing = std::fs::read_to_string(path)?;
         if existing.contains(pubkey) {

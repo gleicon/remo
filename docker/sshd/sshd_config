@@ -23,4 +23,4 @@ UsePAM no
 # Per-user authorized_keys is bind-mounted from /etc/remo on the host.
 # Each key entry must include command="remo git-hook --user <username>" prefix.
 Match User git
-    AuthorizedKeysFile /etc/remo/authorized_keys
+    AuthorizedKeysFile /var/lib/remo/authorized_keys
