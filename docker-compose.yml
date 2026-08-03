@@ -20,8 +20,8 @@ services:
     build:
       context: .
       args:
-        REMO_VERSION: v0.2.1
-        REMO_SHA256: 5586f67b0cdbd6b6c15d088f1eea94cf5258b6ed597dc6e8e00a89f06fd9657b
+        REMO_VERSION: v0.2.2
+        REMO_SHA256: b289d410b7e34712a0bd63d6dd400ad6f215f35e9176c8a43a86cb22b73e66c2
     command: ["remo", "server", "start"]
     restart: unless-stopped
     depends_on:
@@ -37,8 +37,8 @@ services:
     build:
       context: .
       args:
-        REMO_VERSION: v0.2.1
-        REMO_SHA256: 5586f67b0cdbd6b6c15d088f1eea94cf5258b6ed597dc6e8e00a89f06fd9657b
+        REMO_VERSION: v0.2.2
+        REMO_SHA256: b289d410b7e34712a0bd63d6dd400ad6f215f35e9176c8a43a86cb22b73e66c2
     command: >
       sh -c "
         if [ ! -f /etc/ssh/remo_host_keys/ssh_host_ed25519_key ]; then
