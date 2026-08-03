@@ -21,7 +21,11 @@ RUN apt-get update && apt-get install -y \
 # git system user for SSH forced-command deploys (UID 2000 — consistent across containers).
 # password field set to '*' (disabled, not locked) so OpenSSH's allowed_user() check
 # passes for pubkey auth. '!' (default for --system) is treated as locked and denied.
-RUN useradd --uid 2000 --system --shell /usr/sbin/nologin --no-create-home git \
+# Shell must be a valid shell (/bin/sh) so sshd executes the forced command
+# from authorized_keys before inspecting the shell. /usr/sbin/nologin causes
+# sshd to reject the session before the command= prefix runs.
+# Security boundary: forced command in authorized_keys + PasswordAuthentication no.
+RUN useradd --uid 2000 --system --shell /bin/sh --no-create-home git \
     && usermod -p '*' git
 
 # sshd needs /run/sshd and a host key directory.
