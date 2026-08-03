@@ -19,7 +19,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # git system user for SSH forced-command deploys (UID 2000 — consistent across containers).
-RUN useradd --uid 2000 --system --shell /usr/sbin/nologin --no-create-home git
+# password field set to '*' (disabled, not locked) so OpenSSH's allowed_user() check
+# passes for pubkey auth. '!' (default for --system) is treated as locked and denied.
+RUN useradd --uid 2000 --system --shell /usr/sbin/nologin --no-create-home git \
+    && usermod -p '*' git
 
 # sshd needs /run/sshd and a host key directory.
 RUN mkdir -p /run/sshd /etc/ssh/remo_host_keys

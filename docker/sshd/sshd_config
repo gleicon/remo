@@ -15,6 +15,9 @@ X11Forwarding no
 AllowTcpForwarding no
 AllowAgentForwarding no
 PrintMotd no
+# git system account has a locked password (useradd --system).
+# Disable PAM so locked accounts can still authenticate via pubkey.
+UsePAM no
 
 # Match block must be last; only per-user directives allowed inside it.
 # Per-user authorized_keys is bind-mounted from /etc/remo on the host.
