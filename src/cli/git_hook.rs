@@ -127,6 +127,8 @@ fn server_data_dir() -> Result<String> {
 fn init_bare_repo(git_dir: &str, app_name: &str, _data_dir: &str) -> Result<()> {
     let status = Command::new("git")
         .args(["init", "--bare", git_dir])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .context("git init --bare")?;
     if !status.success() {
