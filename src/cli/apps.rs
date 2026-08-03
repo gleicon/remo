@@ -59,8 +59,15 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
     }
 
     let app: serde_json::Value = res.json().await?;
+    let host = base
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or(&base);
     println!("Created: {}", app["hostname"].as_str().unwrap_or(&args.name));
-    println!("Remote:  git remote add remo git@<server>:{}", args.name);
+    println!("Remote:  git remote add remo ssh://git@{host}:2222/{}", args.name);
+    println!("Push:    git push remo main");
     Ok(())
 }
 
