@@ -1,18 +1,22 @@
-FROM rust:1.87-slim AS builder
-RUN apt-get update && apt-get install -y pkg-config && rm -rf /var/lib/apt/lists/*
-WORKDIR /build
-COPY Cargo.toml Cargo.lock ./
-COPY src/ ./src/
-RUN cargo build --release
-
 FROM debian:bookworm-slim
+
+ARG REMO_VERSION=v0.1.0
+# Set REMO_SHA256 to the expected sha256sum of remo-linux-amd64 to verify integrity.
+# Leave empty to skip verification (dev/test only).
+ARG REMO_SHA256=""
+
 RUN apt-get update && apt-get install -y \
         ca-certificates \
         git \
         openssh-server \
+        wget \
+    && wget -qO /usr/local/bin/remo \
+         "https://github.com/gleicon/remo/releases/download/${REMO_VERSION}/remo-linux-amd64" \
+    && if [ -n "${REMO_SHA256}" ]; then \
+         echo "${REMO_SHA256}  /usr/local/bin/remo" | sha256sum -c - || exit 1; \
+       fi \
+    && chmod +x /usr/local/bin/remo \
     && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /build/target/release/remo /usr/local/bin/remo
 
 # git system user for SSH forced-command deploys (UID 2000 — consistent across containers).
 RUN useradd --uid 2000 --system --shell /usr/sbin/nologin --no-create-home git

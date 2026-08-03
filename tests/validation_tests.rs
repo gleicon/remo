@@ -191,3 +191,48 @@ fn parse_app_name_missing_arg() {
     assert_eq!(parse_app_name("git-receive-pack"), None);
     assert_eq!(parse_app_name(""), None);
 }
+
+// ── SSH pubkey validation ─────────────────────────────────────────────────────
+
+fn is_valid_ssh_pubkey(key: &str) -> bool {
+    let key = key.trim();
+    if key.is_empty() { return false; }
+    if key.chars().any(|c| c.is_control()) { return false; }
+    let mut parts = key.splitn(3, ' ');
+    let algo = match parts.next() { Some(a) => a, None => return false };
+    let b64 = match parts.next() { Some(b) => b, None => return false };
+    let valid_algos = ["ssh-ed25519", "ssh-rsa", "ssh-ecdsa", "ecdsa-sha2-nistp256",
+                       "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ecdsa-sk-sha2-nistp256",
+                       "sk-ssh-ed25519@openssh.com"];
+    if !valid_algos.contains(&algo) { return false; }
+    !b64.is_empty() && b64.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))
+}
+
+#[test]
+fn valid_ssh_pubkeys() {
+    let keys = [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG user@host",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG",
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQAB user@laptop",
+        "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAA= comment",
+    ];
+    for key in &keys {
+        assert!(is_valid_ssh_pubkey(key), "expected valid: {key}");
+    }
+}
+
+#[test]
+fn invalid_ssh_pubkeys_rejected() {
+    let bad = [
+        "",                                              // empty
+        "not-a-key blah blah",                          // unknown algo
+        "ssh-ed25519",                                   // missing base64 field
+        "ssh-ed25519 AAAA\ncommand=\"\" evil",          // newline injection
+        "ssh-ed25519 AAAA\rcommand=\"\" evil",          // carriage return injection
+        "ssh-ed25519 AAAA\x00null",                     // null byte
+        "ssh-ed25519 AAAA!!!invalid",                   // non-base64 chars in key field
+    ];
+    for key in &bad {
+        assert!(!is_valid_ssh_pubkey(key), "expected invalid: {key:?}");
+    }
+}

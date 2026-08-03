@@ -14,25 +14,36 @@ The Docker image is ephemeral. Rebuilding it changes nothing about live data.
 
 ## Standard update (code change only)
 
-On your laptop:
+Build and test on your laptop:
 
 ```bash
-git pull                    # fetch latest
-cargo test                  # verify nothing broken
+cargo test                  # run tests natively
 ```
 
-On the VPS:
+Then build the linux/amd64 image locally and ship it (Docker Desktop must be running):
 
 ```bash
-ssh ubuntu@REDACTED_VPS_IP
+# Build for VPS architecture
+docker buildx build --platform linux/amd64 --load -t remo-remo .
 
-cd /home/ubuntu/remo
-git pull                    # pull the same changes
-sudo docker compose build remo remo-sshd   # rebuild images
-sudo docker compose up -d   # restart with new image (nano-rs unchanged)
+# Transfer image to VPS (no Rust compilation on VPS)
+docker save remo-remo | gzip | ssh -i ~/.ssh/id_rsa_mgc_saas_apps ubuntu@REDACTED_VPS_IP "docker load"
+
+# Restart containers (nano-rs unaffected)
+ssh ubuntu@REDACTED_VPS_IP "cd /home/ubuntu/remo && sudo docker compose up -d"
 ```
 
 Downtime: ~2–5 seconds while remo restarts. nano-rs keeps serving traffic during this window.
+
+### Future: binary release workflow
+
+Once remo publishes GitHub release binaries, the Dockerfile will download the binary instead of compiling from source. The update process becomes:
+
+1. Bump `REMO_VERSION` build arg in `docker-compose.yml`
+2. `docker compose build remo remo-sshd` (downloads binary, ~10 seconds)
+3. `docker compose up -d`
+
+No Rust toolchain needed anywhere.
 
 ## Schema migrations
 

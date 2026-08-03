@@ -68,8 +68,8 @@ pub async fn run(cmd: ServerCmd) -> Result<()> {
 
 fn add_key(user: String, key: String) -> Result<()> {
     let key = key.trim();
-    if !key.starts_with("ssh-") && !key.starts_with("ecdsa-sk-") {
-        bail!("key must start with ssh- or ecdsa-sk-");
+    if !crate::validation::is_valid_ssh_pubkey(key) {
+        bail!("invalid ssh public key (check format, no control characters allowed)");
     }
     crate::server::api::write_authorized_key(&user, key)
         .map_err(|e| anyhow::anyhow!("failed to write authorized_keys: {e}"))?;

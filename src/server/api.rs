@@ -548,7 +548,7 @@ async fn invite_claim(
     }
 
     let pubkey = body.ssh_pubkey.trim();
-    if !pubkey.starts_with("ssh-") && !pubkey.starts_with("ecdsa-sk-") {
+    if !crate::validation::is_valid_ssh_pubkey(pubkey) {
         return Err(ApiError::Bad("invalid ssh public key format".into()));
     }
 
@@ -609,9 +609,16 @@ fn gen_token() -> String {
 
 /// Append a forced-command authorized_keys line for `username`.
 /// Idempotent: skips write if the pubkey is already present.
+/// Rejects keys with control characters (newline injection guard).
 pub fn write_authorized_key(username: &str, pubkey: &str) -> std::io::Result<()> {
     use std::io::Write as _;
     let pubkey = pubkey.trim();
+    if !crate::validation::is_valid_ssh_pubkey(pubkey) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid ssh public key",
+        ));
+    }
     let path = std::path::Path::new("/etc/remo/authorized_keys");
     if path.exists() {
         let existing = std::fs::read_to_string(path)?;
