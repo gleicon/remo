@@ -1,82 +1,101 @@
-# Non-destructive remo updates
+# Updating remo
 
 ## What persists between updates
 
 Everything important lives on the host, mounted into containers:
 
-| Host path | What's inside | Mount |
-|---|---|---|
-| `/etc/remo/` | `server.toml`, `master_token`, `authorized_keys` | rw in `remo` container, ro in `remo-sshd` |
-| `/var/lib/remo/` | `state.db` (SQLite), `git/`, `apps/`, `deploys/` | rw in both |
-| `remo_sshd_host_keys` (named volume) | SSH host key | rw in `remo-sshd` |
+| Host path | What's inside |
+|---|---|
+| `/etc/remo/` | `server.toml`, `master_token`, `authorized_keys` |
+| `/var/lib/remo/` | `state.db` (SQLite), `git/`, `apps/`, `deploys/` |
+| `remo_sshd_host_keys` (named Docker volume) | SSH host key |
 
-The Docker image is ephemeral. Rebuilding it changes nothing about live data.
+The Docker image is ephemeral — rebuilding it changes nothing about live data.
 
-## Standard update (code change only)
+## Standard update workflow
 
-Build and test on your laptop:
-
-```bash
-cargo test                  # run tests natively
-```
-
-Then build the linux/amd64 image locally and ship it (Docker Desktop must be running):
+### 1. Commit and tag a new version
 
 ```bash
-# Build for VPS architecture
-docker buildx build --platform linux/amd64 --load -t remo-remo .
+git add -p
+git commit -m "feat: ..."
+git push
 
-# Transfer image to VPS (no Rust compilation on VPS)
-docker save remo-remo | gzip | ssh -i ~/.ssh/id_rsa_mgc_saas_apps ubuntu@REDACTED_VPS_IP "docker load"
-
-# Restart containers (nano-rs unaffected)
-ssh ubuntu@REDACTED_VPS_IP "cd /home/ubuntu/remo && sudo docker compose up -d"
+make release VERSION=v0.2.1
 ```
 
-Downtime: ~2–5 seconds while remo restarts. nano-rs keeps serving traffic during this window.
+This pushes the tag. GitHub Actions (`.github/workflows/release.yml`) picks it up,
+builds `remo-linux-amd64` for linux/amd64, and publishes it as a release asset
+along with a `remo-linux-amd64.sha256` file.
 
-### Future: binary release workflow
+Monitor: https://github.com/gleicon/remo/actions (~2 minutes)
 
-Once remo publishes GitHub release binaries, the Dockerfile will download the binary instead of compiling from source. The update process becomes:
+### 2. Update the pinned version in docker-compose.yml
 
-1. Bump `REMO_VERSION` build arg in `docker-compose.yml`
-2. `docker compose build remo remo-sshd` (downloads binary, ~10 seconds)
-3. `docker compose up -d`
+Once the CI release is done:
 
-No Rust toolchain needed anywhere.
+```bash
+make update-sha VERSION=v0.2.1
+# patches REMO_VERSION and REMO_SHA256 in docker-compose.yml
+
+git add docker-compose.yml
+git commit -m "chore: bump remo to v0.2.1"
+git push
+```
+
+### 3. Deploy to VPS
+
+```bash
+make deploy
+```
+
+This rsyncs the repo to the VPS and runs:
+```bash
+docker compose build --pull remo remo-sshd   # downloads new binary (~10 s)
+docker compose up -d                          # restarts remo + remo-sshd
+```
+
+nano-rs is not restarted and keeps serving traffic during the remo restart (~2–5 s downtime).
 
 ## Schema migrations
 
-remo uses `CREATE TABLE IF NOT EXISTS` in `src/db.rs`. Adding a new table is automatically safe — it runs on startup and skips tables that already exist.
+remo uses `CREATE TABLE IF NOT EXISTS` in `src/db.rs`. New tables are added automatically on startup with no manual step.
 
-**Safe operations** (additive, no restart risk):
+**Safe (additive):**
 - Add a new table
-- Add a nullable column (via a separate `ALTER TABLE ... ADD COLUMN`)
+- Add a nullable column (`ALTER TABLE ... ADD COLUMN`)
 - Add an index
 
-**Unsafe operations** (require care):
-- Rename a column — write new column, migrate data, remove old
-- Drop a column — back up DB first
-- Change column type — SQLite requires rebuilding the table
-
-For any non-additive migration, snapshot the DB first:
-```bash
-sudo cp /var/lib/remo/state.db /var/lib/remo/state.db.$(date +%Y%m%d)
-```
+**Requires care:**
+- Rename or drop a column — snapshot the DB first:
+  ```bash
+  sudo cp /var/lib/remo/state.db /var/lib/remo/state.db.$(date +%Y%m%d)
+  ```
 
 ## Rollback
 
 ```bash
+# On VPS
 cd /home/ubuntu/remo
-git log --oneline -5        # find the previous commit
-git checkout <sha>          # or: git stash + git pull for newer version
-sudo docker compose build remo remo-sshd
-sudo docker compose up -d
+git log --oneline -5
+git checkout <previous-sha>
+make deploy
 ```
 
-## What requires manual intervention
+Or revert `docker-compose.yml` to the previous `REMO_VERSION` and redeploy.
 
-- Changes to `/etc/remo/server.toml`: edit on host, then `sudo docker compose restart remo`
-- Changes to `/etc/remo/authorized_keys`: edit on host — sshd reads it on each connection, no restart needed
-- Changes to nano-rs: rebuild `docker/nano-rs/` and `sudo docker compose build nano-rs && sudo docker compose up -d`
-- Changes to `docker-compose.yml` port mappings or volume mounts: `sudo docker compose down && sudo docker compose up -d` (brief full-stack restart; running apps drop connections for ~5s)
+## Other operational tasks
+
+| Task | Command |
+|---|---|
+| Tail remo logs | `make logs` |
+| Check container status | `make status` |
+| Check HTTPS health | `make health` |
+| Reload server config | `ssh vps "sudo docker compose restart remo"` |
+| Rebuild nano-rs | `ssh vps "cd /home/ubuntu/remo && sudo docker compose build nano-rs && sudo docker compose up -d"` |
+
+Changes to `/etc/remo/authorized_keys` take effect immediately — sshd reads the file on each connection, no restart needed.
+
+Changes to `/etc/remo/server.toml` require `docker compose restart remo`.
+
+Port mapping or volume mount changes in `docker-compose.yml` require a full `docker compose down && up -d` (brief full-stack restart; running apps drop for ~5 s).
