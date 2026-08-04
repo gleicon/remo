@@ -6,56 +6,62 @@ Single-VPS PaaS. `git push` deploys JS/WASM apps to a nano-rs V8 runtime. No Kub
 git push remo main  →  extract  →  symlink swap  →  nano-rs reload
 ```
 
-Apps live at `{owner}-{app}.{domain}`. Optional custom domain via `PUT /api/apps/:name/domain`.
+Apps live at `{owner}-{app}.{domain}`. One nano-rs process routes all apps by `Host` header.
 
 ---
 
-## Server setup (ops)
+## Architecture
 
-**Requirements:** Linux VPS, Docker, nginx/Caddy with TLS, ports 443 and 2222 open.
+```
+laptop: git push ssh://cloud.yourdomain.tld/myapp
+  │
+  HOST sshd :22 → forced command → remo git-hook --user alice
+    ├── verify ownership
+    ├── git-receive-pack /var/lib/remo/git/myapp.git
+    └── post-receive: extract → symlink → nano-rs admin API
 
-```bash
-git clone https://github.com/gleicon/remo
-cd remo
-
-sudo mkdir -p /etc/remo /var/lib/remo
-sudo tee /etc/remo/server.toml <<EOF
-domain      = "apps.example.com"
-data_dir    = "/var/lib/remo"
-nano_socket = "http://127.0.0.1:8889"
-bind        = "0.0.0.0:7070"
-EOF
-
-sudo remo server init    # writes /etc/remo/master_token
+HOST: nano-rs (Docker) :8080   all apps, one process
+HOST: remo API (Docker) :7070  control plane
+HOST: nginx :443               *.domain → :8080, domain → :7070
 ```
 
-Generate an admin key for the nano-rs admin API and wire it up:
+See [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) for the full install walkthrough.
+
+---
+
+## Quick install (Docker, Ubuntu 22.04+)
 
 ```bash
-NANO_KEY=$(openssl rand -hex 32)
-echo "NANO_ADMIN_API_KEY=$NANO_KEY" > .env    # read by docker compose
-sudo sed -i "s|nano_admin_key = .*|nano_admin_key = \"$NANO_KEY\"|" /etc/remo/server.toml
+# 1. Clone and install host binary
+git clone https://github.com/gleicon/remo && cd remo
+wget -qO /usr/local/bin/remo \
+  https://github.com/gleicon/remo/releases/download/v0.2.5/remo-linux-amd64
+chmod +x /usr/local/bin/remo
 
+# 2. One-time host prep
+useradd --system --uid 2000 --shell /bin/sh --no-create-home git && usermod -p '*' git
+mkdir -p /var/lib/remo/{apps,git} && touch /var/lib/remo/authorized_keys
+chown -R git:git /var/lib/remo
+
+# 3. Run installer (generates master_token + .env)
+remo server install --docker --domain yourdomain.tld
+
+# 4. Configure sshd for git user (see SETUP_GUIDE.md §1d)
+# 5. Start Docker stack
 docker compose up -d
-```
 
-nginx routes: `remo.example.com → :7070`, `*.apps.example.com → :8080`.
+# 6. Set up nginx + TLS (see SETUP_GUIDE.md §3)
+```
 
 ---
 
 ## Admin first login
 
-Install the CLI on your laptop:
-
-```bash
-cargo install --git https://github.com/gleicon/remo
-# or download from https://github.com/gleicon/remo/releases
-```
+On your laptop:
 
 ```bash
 remo setup
 # prompts: server URL, master token (from /etc/remo/master_token), username, SSH key
-# writes ~/.config/remo/config.toml and ~/.ssh/config entry
 ```
 
 ---
@@ -71,21 +77,27 @@ Alice runs on her laptop:
 
 ```bash
 remo setup --invite <token>
-# picks or generates SSH key, claims account, writes config
+# registers SSH key, creates account, configures ~/.remo/config.toml
 ```
 
 ---
 
 ## Deploy an app
 
-```bash
-remo apps create myapp
-
-git remote add remo git@remo.example.com:myapp
-git push remo main
+```javascript
+// index.js — WinterTC Service Worker pattern
+addEventListener("fetch", (event) =>
+  event.respondWith(new Response("hello", { status: 200 }))
+);
 ```
 
-App live at `alice-myapp.apps.example.com`.
+```bash
+remo apps create myapp
+git init && git add index.js && git commit -m "init"
+git remote add remo ssh://yourdomain.tld/myapp
+git push remo main
+# live at https://alice-myapp.yourdomain.tld
+```
 
 ```bash
 remo apps list

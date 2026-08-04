@@ -26,7 +26,7 @@ laptop
 VPS
   nginx/Caddy :443  →  nano-rs :8080  (Host-header routing)
   remo control :7070   (localhost only)
-  nano-rs admin :9000  (localhost only)
+  nano-rs admin :8889  (localhost only)
 ```
 
 ## Key files
@@ -93,7 +93,7 @@ Config at `/etc/remo/server.toml`:
 ```toml
 domain = "apps.yourdomain.tld"
 data_dir = "/var/lib/remo"
-nano_socket = "http://127.0.0.1:9000"
+nano_socket = "http://127.0.0.1:8889"
 bind = "127.0.0.1:7070"
 ```
 

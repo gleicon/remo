@@ -31,7 +31,7 @@ remo CLI
 |--------|-----------------------|-----------------|
 | 80/443 | nginx / Caddy         | public          |
 | 8080   | nano-rs data plane    | localhost only  |
-| 9000   | nano-rs admin API     | localhost only  |
+| 8889   | nano-rs admin API     | localhost only  |
 | 7070   | remo control plane    | localhost only  |
 
 ## Directory layout
@@ -116,7 +116,7 @@ DELETE /api/users/:name                   (admin)
 
 ### Add a new nano-rs admin API call
 
-Add a method to `NanoClient` in `src/nano_client.rs`. The client talks to `http://127.0.0.1:9000` (configurable via `server.toml`).
+Add a method to `NanoClient` in `src/nano_client.rs`. The client talks to `http://127.0.0.1:8889` (configurable via `server.toml`).
 
 ### Change deploy behavior
 

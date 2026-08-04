@@ -56,6 +56,14 @@ docker compose up -d                          # restarts remo + remo-sshd
 
 nano-rs is not restarted and keeps serving traffic during the remo restart (~2–5 s downtime).
 
+### When you rebuild nano-rs
+
+nano-rs keeps app registrations in memory. Rebuilding its container clears them — apps return a blank "NANO Runtime" page until re-registered. After `docker compose up -d nano-rs`, trigger a `git push` for each app to re-register it:
+
+```bash
+cd /path/to/myapp && git commit --allow-empty -m "re-register" && git push remo main
+```
+
 ## Schema migrations
 
 remo uses `CREATE TABLE IF NOT EXISTS` in `src/db.rs`. New tables are added automatically on startup with no manual step.
