@@ -46,7 +46,7 @@ bump:
 # The host binary is used by the git user's forced command for git-push deploys.
 deploy:
 	rsync -avz --delete \
-	  --exclude=target/ --exclude=.git/ --exclude='*.db' \
+	  --exclude=target/ --exclude=.git/ --exclude='*.db' --exclude='.env' \
 	  -e "ssh -i $(VPS_SSH_KEY) -o StrictHostKeyChecking=no" \
 	  . $(VPS_USER)@$(VPS_HOST):$(VPS_DIR)/
 	$(SSH) "cd $(VPS_DIR) && sudo docker compose build --pull remo && sudo docker compose up -d"

@@ -27,6 +27,15 @@ bind        = "0.0.0.0:7070"
 EOF
 
 sudo remo server init    # writes /etc/remo/master_token
+```
+
+Generate an admin key for the nano-rs admin API and wire it up:
+
+```bash
+NANO_KEY=$(openssl rand -hex 32)
+echo "NANO_ADMIN_API_KEY=$NANO_KEY" > .env    # read by docker compose
+sudo sed -i "s|nano_admin_key = .*|nano_admin_key = \"$NANO_KEY\"|" /etc/remo/server.toml
+
 docker compose up -d
 ```
 
