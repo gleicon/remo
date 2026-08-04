@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
         python3 \
     && rm -rf /var/lib/apt/lists/*
 
-ARG NANO_RS_VERSION=v2.2.1
+ARG NANO_RS_VERSION=v2.2.2
 RUN git clone --depth 1 --branch ${NANO_RS_VERSION} https://github.com/gleicon/nano-rs.git /build/nano-rs
 WORKDIR /build/nano-rs
 RUN cargo build --release
