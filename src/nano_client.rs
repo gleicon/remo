@@ -30,7 +30,11 @@ impl NanoClient {
     }
 
     pub fn from_config(cfg: &crate::config::ServerConfig) -> Self {
-        Self::new_with_key(&cfg.nano_socket, cfg.nano_admin_key.as_deref())
+        // REMO_NANO_SOCKET overrides server.toml — lets the host git-hook use
+        // 127.0.0.1:8889 while the Docker container uses the nano-rs DNS name.
+        let socket = std::env::var("REMO_NANO_SOCKET")
+            .unwrap_or_else(|_| cfg.nano_socket.clone());
+        Self::new_with_key(&socket, cfg.nano_admin_key.as_deref())
     }
 
     // ── App CRUD ──────────────────────────────────────────────────────────
