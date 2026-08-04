@@ -21,9 +21,6 @@ services:
   remo:
     build:
       context: .
-      args:
-        REMO_VERSION: v0.2.5
-        REMO_SHA256: 21d8f60d2b054da88611d00cfeb0fa67600dfa4172b20494355014ba4a9c5742
     command: ["remo", "server", "start"]
     environment:
       REMO_NANO_SOCKET: "http://nano-rs:8889"

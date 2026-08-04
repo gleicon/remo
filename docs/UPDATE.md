@@ -29,20 +29,7 @@ GitHub Actions (`.github/workflows/release.yml`) builds a static `remo-linux-amd
 
 Monitor: https://github.com/gleicon/remo/actions
 
-### 2. Update the pinned version in docker-compose.yml
-
-Once CI is done:
-
-```bash
-make bump VERSION=v1.2.3
-# patches REMO_VERSION and REMO_SHA256 in docker-compose.yml
-
-git add docker-compose.yml
-git commit -m "chore: bump remo to v1.2.3"
-git push
-```
-
-### 3. Deploy to VPS
+### 2. Deploy to VPS
 
 ```bash
 make deploy
@@ -50,8 +37,8 @@ make deploy
 
 This rsyncs the repo to the VPS and runs:
 ```bash
-docker compose build --pull remo remo-sshd   # downloads new binary (~10 s)
-docker compose up -d                          # restarts remo + remo-sshd
+docker compose build --no-cache remo   # builds from source (~2 min on VPS)
+docker compose up -d                   # restarts remo
 ```
 
 nano-rs is not restarted and keeps serving traffic during the remo restart (~2–5 s downtime).
