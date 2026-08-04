@@ -52,6 +52,7 @@ pub async fn run(args: GitHookArgs) -> Result<()> {
     Err(Command::new("git-receive-pack")
         .arg(&git_dir)
         .env("REMO_USER", &args.user)
+        .env("REMO_APP", &app_name)
         .exec()
         .into())
 }
@@ -147,9 +148,10 @@ fn init_bare_repo(git_dir: &str, app_name: &str, _data_dir: &str) -> Result<()> 
     let hook = format!(
         "#!/bin/sh\n\
          # remo post-receive — DO NOT EDIT (managed by remo)\n\
-         APP=$(basename \"${{GIT_DIR}}\" .git)\n\
+         # REMO_APP is set by remo git-hook before exec'ing git-receive-pack.\n\
+         # GIT_DIR is '.' inside hooks so we cannot derive the app name from it.\n\
          while read oldrev newrev ref; do\n\
-             {remo_bin} git-hook --user \"${{REMO_USER}}\" --deploy \"${{APP}}\" --sha \"${{newrev}}\"\n\
+             {remo_bin} git-hook --user \"${{REMO_USER}}\" --deploy \"${{REMO_APP}}\" --sha \"${{newrev}}\"\n\
          done\n"
     );
     std::fs::write(&hook_path, hook.as_bytes())?;
