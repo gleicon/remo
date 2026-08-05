@@ -72,6 +72,7 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
     let remote_url = format!("ssh://{host}/{}", args.name);
 
     println!("App:     {hostname}");
+    println!("URL:     https://{hostname}");
 
     // Are we already inside a git repo?
     let in_git = std::process::Command::new("git")

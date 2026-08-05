@@ -14,13 +14,36 @@ pub async fn run() -> Result<()> {
         bail!("git push failed");
     }
 
-    // Print the current HEAD sha so the user sees what was deployed.
-    if let Ok(out) = std::process::Command::new("git")
+    let sha = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
-    {
-        let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        println!("Deployed {app} @ {sha}");
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
+    println!("Deployed {app} @ {sha}");
+
+    // Fetch hostname from server to print the live URL.
+    if let Ok(cfg) = crate::config::ClientConfig::load() {
+        use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+        let mut headers = HeaderMap::new();
+        if let Ok(v) = HeaderValue::from_str(&format!("Bearer {}", cfg.token)) {
+            headers.insert(AUTHORIZATION, v);
+        }
+        if let Ok(client) = reqwest::Client::builder().default_headers(headers).build() {
+            if let Ok(res) = client
+                .get(format!("{}/api/apps/{app}", cfg.server_url))
+                .send()
+                .await
+            {
+                if let Ok(info) = res.json::<serde_json::Value>().await {
+                    if let Some(h) = info["hostname"].as_str() {
+                        println!("URL:     https://{h}");
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
