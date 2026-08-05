@@ -131,9 +131,15 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
 
 fn starter_js(name: &str) -> String {
     format!(
-        r#"addEventListener("fetch", (event) => {{
-  event.respondWith(new Response("hello from {name}", {{ status: 200 }}));
-}});
+        r#"export default {{
+  fetch(request) {{
+    const url = new URL(request.url);
+    if (url.pathname === "/") {{
+      return new Response("hello from {name}", {{ status: 200 }});
+    }}
+    return new Response("Not Found", {{ status: 404 }});
+  }},
+}};
 "#
     )
 }
