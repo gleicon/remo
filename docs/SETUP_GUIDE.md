@@ -274,16 +274,23 @@ Both patterns implement the WinterTC fetch interface. `request` is a standard [R
 ## 6. Invite another user (Alice)
 
 ```bash
-remo users invite alice --email alice@example.com
+remo users invite alice
 ```
 
-Prints a single-use claim command valid for 1 hour. Send it to Alice. She runs on her laptop:
+Prints a shareable link and a CLI command (valid 1 hour). Send either to Alice:
+
+```
+Link:    https://yourdomain.tld/invite/<token>
+Command: remo setup --invite <token>
+```
+
+Alice runs on her laptop (both forms accepted):
 
 ```bash
-remo setup --invite <token>
+remo setup --invite https://yourdomain.tld/invite/<token>
 ```
 
-This registers her SSH key server-side and creates her account. No manual key copying or authorized_keys editing.
+This registers her SSH key and creates her account. No manual authorized_keys editing.
 
 ---
 

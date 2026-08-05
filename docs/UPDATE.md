@@ -36,10 +36,10 @@ nano-rs is not restarted and keeps serving traffic during the remo restart (~2â€
 
 ### When you rebuild nano-rs
 
-nano-rs keeps app registrations in memory. Rebuilding its container clears them â€” apps return a blank "NANO Runtime" page until re-registered. After `docker compose up -d nano-rs`, trigger a `git push` for each app to re-register it:
+nano-rs keeps app registrations in memory. Rebuilding its container clears them. remo re-registers all apps automatically within 30 seconds. If you need immediate recovery:
 
 ```bash
-cd /path/to/myapp && git commit --allow-empty -m "re-register" && git push remo main
+cd /path/to/myapp && git commit --allow-empty -m "re-register" && remo push
 ```
 
 ## Schema migrations
