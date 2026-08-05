@@ -189,10 +189,8 @@ async fn apps_create(
         updated_at: now,
     };
     db::app_create(&state.pool, &app).await?;
-
-    let app_dir = format!("{}/apps/{}", state.cfg.data_dir, body.name);
-    std::fs::create_dir_all(format!("{app_dir}/deploys"))?;
-
+    // Do NOT create the app directory here — this runs as root inside Docker.
+    // The deploy hook (git user on host) creates it on first push.
     Ok((StatusCode::CREATED, Json(app.into())))
 }
 
