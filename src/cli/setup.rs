@@ -108,9 +108,11 @@ async fn run_admin_bootstrap(server_url: String) -> Result<()> {
 
     let ssh_pub = pick_or_generate_key()?;
 
-    // Create user account via API (master token auth)
     let client = authed_client(&master_token);
-    let res = client
+
+    // If the user already exists (e.g. re-running setup after a master token rotation),
+    // skip creation and use the existing token already in the local config.
+    let create_res = client
         .post(format!("{server_url}/api/users"))
         .json(&serde_json::json!({
             "name": username,
@@ -120,14 +122,24 @@ async fn run_admin_bootstrap(server_url: String) -> Result<()> {
         .await
         .context("create user")?;
 
-    if !res.status().is_success() {
-        bail!("create user failed: {}", res.text().await?);
+    let user_token: String = if create_res.status().as_u16() == 409 {
+        // User already exists — load existing local token.
+        println!("User '{username}' already exists. Re-using existing token.");
+        crate::config::ClientConfig::load()
+            .map(|c| c.token)
+            .unwrap_or_default()
+    } else if create_res.status().is_success() {
+        let body: serde_json::Value = create_res.json().await?;
+        body["token"].as_str().context("no token in response")?.to_string()
+    } else {
+        bail!("create user failed: {}", create_res.text().await?);
+    };
+
+    if user_token.is_empty() {
+        bail!("user already exists but no local token found — use option 2 (User token) instead");
     }
 
-    let body: serde_json::Value = res.json().await?;
-    let user_token = body["token"].as_str().context("no token in response")?;
-
-    save_config(&server_url, user_token)?;
+    save_config(&server_url, &user_token)?;
     write_ssh_config_entry(&server_url)?;
 
     println!();
