@@ -2,3 +2,4 @@
 .env
 *.db
 .make.env
+.project/state.md
