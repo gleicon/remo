@@ -20,11 +20,19 @@ pub struct CreateArgs {
     /// App name (becomes <name>.<domain>)
     pub name: String,
 
-    /// App type: js | wasm | static
+    /// Scaffold an HTML-serving JS worker instead of the default API starter
+    #[arg(long, conflicts_with = "wasm")]
+    pub html: bool,
+
+    /// Scaffold a WebAssembly starter (JS wrapper + inline wasm module)
+    #[arg(long, conflicts_with = "html")]
+    pub wasm: bool,
+
+    /// App type: js | wasm | static (overridden by --html/--wasm)
     #[arg(long = "type", default_value = "js")]
     pub app_type: String,
 
-    /// Entry point (e.g. index.js or index.wasm)
+    /// Entry point (overridden by --html/--wasm)
     #[arg(long, default_value = "index.js")]
     pub entrypoint: String,
 }
@@ -41,15 +49,25 @@ pub async fn run(cmd: AppsCmd) -> Result<()> {
     }
 }
 
+enum Template { Js, Html, Wasm }
+
 async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
     let cfg = ClientConfig::load()?;
     let base = &cfg.server_url;
+
+    let template = if args.wasm { Template::Wasm } else if args.html { Template::Html } else { Template::Js };
+    let (app_type, entrypoint) = match &template {
+        Template::Wasm => ("js".to_string(), "index.js".to_string()),
+        Template::Html => ("js".to_string(), "index.js".to_string()),
+        Template::Js   => (args.app_type.clone(), args.entrypoint.clone()),
+    };
+
     let res = client
         .post(format!("{base}/api/apps"))
         .json(&serde_json::json!({
             "name": args.name,
-            "type": args.app_type,
-            "entrypoint": args.entrypoint,
+            "type": app_type,
+            "entrypoint": entrypoint,
         }))
         .send()
         .await?;
@@ -62,7 +80,6 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
     let app: serde_json::Value = res.json().await?;
     let hostname = app["hostname"].as_str().unwrap_or(&args.name).to_string();
 
-    // SSH remote: ssh://host/appname (works with any standard SSH config)
     let host = base
         .trim_start_matches("https://")
         .trim_start_matches("http://")
@@ -74,7 +91,6 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
     println!("App:     {hostname}");
     println!("URL:     https://{hostname}");
 
-    // Are we already inside a git repo?
     let in_git = std::process::Command::new("git")
         .args(["rev-parse", "--git-dir"])
         .stdout(std::process::Stdio::null())
@@ -84,7 +100,6 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
         .unwrap_or(false);
 
     if in_git {
-        // Already a repo — just add the remote.
         let added = std::process::Command::new("git")
             .args(["remote", "add", "remo", &remote_url])
             .status()
@@ -97,14 +112,26 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
         }
         println!("Deploy:  remo push");
     } else {
-        // Create directory, init repo, write starter file, initial commit.
         std::fs::create_dir_all(&args.name)?;
 
-        // Write a minimal starter matching the entrypoint filename.
-        let starter = format!("{}/{}", args.name, args.entrypoint);
-        if !std::path::Path::new(&starter).exists() {
-            std::fs::write(&starter, starter_js(&args.name))?;
-            println!("Created: {starter}");
+        let files: Vec<(&str, String)> = match &template {
+            Template::Html => vec![
+                ("index.js", starter_html(&args.name)),
+            ],
+            Template::Wasm => vec![
+                ("index.js", starter_wasm(&args.name)),
+            ],
+            Template::Js => vec![
+                (&entrypoint, starter_js(&args.name)),
+            ],
+        };
+
+        for (filename, content) in &files {
+            let path = format!("{}/{filename}", args.name);
+            if !std::path::Path::new(&path).exists() {
+                std::fs::write(&path, content)?;
+                println!("Created: {path}");
+            }
         }
 
         let run = |cmd: &str, a: &[&str]| {
@@ -143,6 +170,81 @@ fn starter_js(name: &str) -> String {
 "#
     )
 }
+
+fn starter_html(name: &str) -> String {
+    format!(
+        r#"const HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{name}</title>
+  <style>
+    body {{ font-family: sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; }}
+    h1 {{ color: #111; }}
+  </style>
+</head>
+<body>
+  <h1>{name}</h1>
+  <p>Edit this HTML in <code>index.js</code> and run <code>remo push</code>.</p>
+</body>
+</html>`;
+
+export default {{
+  fetch(request) {{
+    const url = new URL(request.url);
+    if (url.pathname === "/") {{
+      return new Response(HTML, {{
+        status: 200,
+        headers: {{ "Content-Type": "text/html; charset=utf-8" }},
+      }});
+    }}
+    return new Response("Not Found", {{ status: 404 }});
+  }},
+}};
+"#
+    )
+}
+
+fn starter_wasm(_name: &str) -> String {
+    // Minimal wasm module: exports add(i32, i32) -> i32
+    // Compile your own with wasm-pack or replace WASM_B64 with your module.
+    r#"// Inline wasm module: exports add(a, b) -> a + b
+// Replace WASM_B64 with your own compiled .wasm (base64-encoded).
+const WASM_B64 = "AGFzbQEAAAABBwFgAn9/AX8DAgEABwcBA2FkZAAACgkBBwAgACABags=";
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+let _wasm;
+async function getWasm() {
+  if (!_wasm) {
+    const { instance } = await WebAssembly.instantiate(b64ToBytes(WASM_B64));
+    _wasm = instance.exports;
+  }
+  return _wasm;
+}
+
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/add") {
+      const w = await getWasm();
+      const a = Number(url.searchParams.get("a") ?? 0);
+      const b = Number(url.searchParams.get("b") ?? 0);
+      return new Response(String(w.add(a, b)), {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      });
+    }
+    return new Response("try /add?a=2&b=3", { status: 200 });
+  },
+};
+"#.to_string()
+}
+
 
 async fn list(client: reqwest::Client) -> Result<()> {
     let base = ClientConfig::load()?.server_url;
