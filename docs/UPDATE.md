@@ -14,18 +14,13 @@ The Docker image is ephemeral — rebuilding it changes nothing about live data.
 
 ## Standard update workflow
 
-### 1. Commit and tag a new version
+### 1. Release a new version
 
 ```bash
-git add -p
-git commit -m "feat: ..."
-git push
-
-make tag VERSION=v1.2.3       # create local tag
-make tag-push VERSION=v1.2.3  # push → CI builds linux/amd64 binary (~2 min)
+make release VERSION=v0.4.0
 ```
 
-GitHub Actions (`.github/workflows/release.yml`) builds a static `remo-linux-amd64` binary and publishes it with a SHA256 file.
+This bumps `Cargo.toml`, commits, tags, and pushes — CI builds a static `remo-linux-amd64` binary (~2 min).
 
 Monitor: https://github.com/gleicon/remo/actions
 
@@ -35,11 +30,7 @@ Monitor: https://github.com/gleicon/remo/actions
 make deploy
 ```
 
-This rsyncs the repo to the VPS and runs:
-```bash
-docker compose build --no-cache remo   # builds from source (~2 min on VPS)
-docker compose up -d                   # restarts remo
-```
+Rsyncs source to VPS, rebuilds the remo container from source, and copies the binary to `/usr/local/bin/remo` on the host (needed for the git-hook forced command).
 
 nano-rs is not restarted and keeps serving traffic during the remo restart (~2–5 s downtime).
 
@@ -75,8 +66,6 @@ git log --oneline -5
 git checkout <previous-sha>
 make deploy
 ```
-
-Or revert `docker-compose.yml` to the previous `REMO_VERSION` and redeploy.
 
 ## Other operational tasks
 
