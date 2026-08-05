@@ -1,6 +1,9 @@
+# VPS connection — override via environment or .make.env (gitignored).
+# Example: VPS_HOST=1.2.3.4 VPS_SSH_KEY=~/.ssh/id_rsa make deploy
+-include .make.env
 VPS_USER    ?= ubuntu
-VPS_HOST    ?= REDACTED_VPS_IP
-VPS_SSH_KEY ?= ~/.ssh/id_rsa_mgc_saas_apps
+VPS_HOST    ?=
+VPS_SSH_KEY ?= ~/.ssh/id_rsa
 VPS_DIR     ?= /home/ubuntu/remo
 SSH          = ssh -i $(VPS_SSH_KEY) -o StrictHostKeyChecking=no $(VPS_USER)@$(VPS_HOST)
 
