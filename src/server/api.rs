@@ -588,8 +588,15 @@ async fn users_delete(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> ApiResult<StatusCode> {
+    let user = db::user_get_by_name(&state.pool, &name).await?.ok_or(ApiError::NotFound)?;
     if !db::user_delete(&state.pool, &name).await? {
         return Err(ApiError::NotFound);
+    }
+    // Remove the user's SSH key from authorized_keys so the forced command no longer works.
+    if let Some(ref pubkey) = user.ssh_pubkey {
+        if let Err(e) = revoke_authorized_key(&name, pubkey) {
+            tracing::warn!("user {name} deleted but authorized_keys removal failed: {e}");
+        }
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -634,6 +641,22 @@ pub fn write_authorized_key(username: &str, pubkey: &str) -> std::io::Result<()>
     file.write_all(line.as_bytes())
 }
 
+/// Remove all authorized_keys lines that contain `pubkey` for `username`.
+fn revoke_authorized_key(username: &str, pubkey: &str) -> std::io::Result<()> {
+    let path = std::path::Path::new("/var/lib/remo/authorized_keys");
+    if !path.exists() { return Ok(()); }
+    let existing = std::fs::read_to_string(path)?;
+    let filtered: String = existing
+        .lines()
+        .filter(|line| {
+            // Remove lines that are the forced-command entry for this user+key.
+            !(line.contains(pubkey) && line.contains(username))
+        })
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(path, filtered)
+}
+
 // ── Ownership check ───────────────────────────────────────────────────────────
 
 fn check_ownership(auth: &AuthUser, owner: &str) -> ApiResult<()> {
@@ -667,10 +690,22 @@ impl IntoResponse for ApiError {
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not found".into()),
             ApiError::Conflict(m) => (StatusCode::CONFLICT, m),
             ApiError::Bad(m) => (StatusCode::BAD_REQUEST, m),
-            ApiError::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m),
-            ApiError::Db(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            ApiError::Anyhow(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            ApiError::Io(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            ApiError::Internal(m) => {
+                tracing::error!("internal error: {m}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".into())
+            }
+            ApiError::Db(e) => {
+                tracing::error!("db error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".into())
+            }
+            ApiError::Anyhow(e) => {
+                tracing::error!("error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".into())
+            }
+            ApiError::Io(e) => {
+                tracing::error!("io error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".into())
+            }
         };
         (status, Json(serde_json::json!({ "error": msg }))).into_response()
     }
