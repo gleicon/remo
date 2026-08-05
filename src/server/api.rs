@@ -286,6 +286,9 @@ async fn apps_scale(
     Json(body): Json<ScaleBody>,
 ) -> ApiResult<StatusCode> {
     validate_app_name(&name)?;
+    if body.workers == 0 || body.workers > 32 {
+        return Err(ApiError::Bad("workers must be between 1 and 32".into()));
+    }
     let app = db::app_get(&state.pool, &name).await?.ok_or(ApiError::NotFound)?;
     check_ownership(&auth, &app.owner)?;
     let nano = crate::nano_client::NanoClient::from_config(&state.cfg);
@@ -324,6 +327,12 @@ async fn env_set(
     let app = db::app_get(&state.pool, &name).await?.ok_or(ApiError::NotFound)?;
     check_ownership(&auth, &app.owner)?;
     for (k, v) in &body.vars {
+        if k.is_empty() || k.len() > 256 || !k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(ApiError::Bad(format!("invalid env key '{k}': use uppercase letters, digits, underscores only")));
+        }
+        if v.len() > 65536 {
+            return Err(ApiError::Bad(format!("env value for '{k}' exceeds 64 KB limit")));
+        }
         let enc = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, v);
         db::env_set(&state.pool, &name, k, &enc).await?;
     }
@@ -424,6 +433,11 @@ async fn users_create(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateUserBody>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    if !crate::validation::is_valid_app_name(&body.name) {
+        return Err(ApiError::Bad(
+            "username must be 1-32 lowercase alphanum/hyphen chars".into(),
+        ));
+    }
     if db::user_get_by_name(&state.pool, &body.name).await?.is_some() {
         return Err(ApiError::Conflict("user already exists".into()));
     }
