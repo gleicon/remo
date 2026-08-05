@@ -97,14 +97,20 @@ systemctl reload ssh
 
 ### 1e. Install the remo binary on the host
 
-The git-hook runs as a host process (not inside Docker). Download the latest release:
+The git-hook runs as a host process (not inside Docker). The binary is built from source inside the Docker image and then copied out:
 
 ```bash
-VER=v0.2.5
-wget -qO /usr/local/bin/remo \
-  "https://github.com/gleicon/remo/releases/download/${VER}/remo-linux-amd64"
-chmod +x /usr/local/bin/remo
+# After the Docker stack is running (step 2 below):
+docker compose cp remo:/usr/local/bin/remo /usr/local/bin/remo
 remo --version
+```
+
+Alternatively, if you have Rust on the host:
+
+```bash
+git clone https://github.com/gleicon/remo /home/ubuntu/remo
+cd /home/ubuntu/remo && cargo build --release
+cp target/release/remo /usr/local/bin/remo
 ```
 
 ### 1f. Clone remo and run the installer
@@ -227,45 +233,41 @@ After setup, the master token is no longer needed day-to-day. Your user token in
 
 ## 5. Deploy your first app
 
+`remo apps create` scaffolds everything — creates the directory, writes a starter `index.js`, initialises a git repo, and adds the remo remote:
+
 ```bash
-# Create the app record on the server
 remo apps create myapp
-
-# Write a minimal JS app
-cat > index.js << 'EOF'
-addEventListener("fetch", (event) =>
-  event.respondWith(new Response("hello from remo", { status: 200 }))
-);
-EOF
-
-git init && git add index.js && git commit -m "initial"
-
-# Add the git remote (path is just /appname)
-git remote add remo ssh://yourdomain.tld/myapp
-
-git push remo main
+cd myapp
+remo push
 ```
 
 Live at `https://alice-myapp.yourdomain.tld`.
 
 ### Writing app code
 
-Apps use the WinterTC Service Worker pattern (same as Cloudflare Workers):
+Apps use the ES module pattern (same as Cloudflare Workers):
+
+```javascript
+export default {
+  fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/") {
+      return new Response("hello from myapp", { status: 200 });
+    }
+    return new Response("Not Found", { status: 404 });
+  },
+};
+```
+
+The Service Worker `addEventListener` pattern is also supported:
 
 ```javascript
 addEventListener("fetch", (event) => {
-  const req = event.request;
-  const url  = req.url;
-  const method = req.method;
-
-  event.respondWith(new Response(JSON.stringify({ url, method }), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  }));
+  event.respondWith(new Response("hello", { status: 200 }));
 });
 ```
 
-`event.request` is a standard [Request](https://developer.mozilla.org/en-US/docs/Web/API/Request) object. `event.respondWith` takes a [Response](https://developer.mozilla.org/en-US/docs/Web/API/Response).
+Both patterns implement the WinterTC fetch interface. `request` is a standard [Request](https://developer.mozilla.org/en-US/docs/Web/API/Request) object; return a [Response](https://developer.mozilla.org/en-US/docs/Web/API/Response).
 
 ---
 
@@ -291,19 +293,23 @@ This registers her SSH key server-side and creates her account. No manual key co
 # List your apps
 remo apps list
 
-# Environment variables
-remo env set myapp DATABASE_URL=postgres://...
-remo env list myapp
-remo env unset myapp DATABASE_URL
+# Deploy (run from inside the app directory)
+remo push
 
-# Redeploy (just push)
-git push remo main
+# Environment variables (app name inferred from git remote when run inside the app dir)
+remo env set DATABASE_URL=postgres://...
+remo env list
+remo env unset DATABASE_URL
+
+# Or specify the app name explicitly
+remo env set myapp DATABASE_URL=postgres://...
+
+# Logs (also infers app name from git remote)
+remo logs --lines 200
+remo logs myapp --lines 200
 
 # Deployment history
 remo deployments myapp
-
-# Logs
-remo logs myapp --lines 200
 ```
 
 ---
@@ -334,18 +340,13 @@ This appends the forced-command line to `/var/lib/remo/authorized_keys`. sshd re
 
 ## 9. nano-rs restart and app registration
 
-nano-rs keeps app registrations in memory. If the container restarts (upgrade, crash), registrations are lost and apps return a blank "NANO Runtime" page.
+nano-rs keeps app registrations in memory. If the container restarts (upgrade, crash), registrations are lost. **remo detects this automatically**: on startup and every 30 seconds it checks nano-rs health, and re-registers all apps if nano-rs came back up.
 
-**Workaround:** After a nano-rs restart, any `git push` for an app re-registers it. To re-register all apps at once:
+Manual re-register (if you need immediate recovery without waiting):
 
 ```bash
-# Trigger empty push for each app (run from a checked-out repo)
-for app in $(remo apps list --short); do
-  cd /path/to/$app && git commit --allow-empty -m "re-register" && git push remo main
-done
+cd /path/to/myapp && git commit --allow-empty -m "re-register" && remo push
 ```
-
-A future release will re-register all apps automatically on nano-rs startup.
 
 ---
 
@@ -371,10 +372,10 @@ ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw enable
 
 ### "NANO Runtime" instead of app response
 
-nano-rs lost the app registration (container restart). Re-register:
+nano-rs lost the app registration (container restart). remo re-registers automatically within 30 seconds. If you need it immediately:
 
 ```bash
-cd /path/to/myapp && git commit --allow-empty -m "re-register" && git push remo main
+cd /path/to/myapp && git commit --allow-empty -m "re-register" && remo push
 ```
 
 ### git push: "Permission denied (publickey)"
