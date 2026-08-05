@@ -58,16 +58,14 @@ pub async fn run(cmd: UsersCmd) -> Result<()> {
                 anyhow::bail!("{}", res.text().await?);
             }
             let body: serde_json::Value = res.json().await?;
-            let cmd = body["claim_command"].as_str().unwrap_or("(error)");
+            let token = body["token"].as_str().unwrap_or("(error)");
             let exp = body["expires_at"].as_str().unwrap_or("?");
+            let link = format!("{base}/invite/{token}");
             println!("Invite created for '{}' (expires {})", args.name, exp);
             println!();
-            println!("Send this command to the user (shown once):");
-            println!("  {cmd}");
-            if let Some(ref email) = args.email {
-                println!();
-                println!("Email: {email}");
-            }
+            println!("Share either of these with the user (shown once):");
+            println!("  Link:    {link}");
+            println!("  Command: remo setup --invite {token}");
         }
         UsersCmd::Invites => {
             let res = client.get(format!("{base}/api/admin/invites")).send().await?;

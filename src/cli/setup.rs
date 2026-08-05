@@ -10,7 +10,13 @@ pub struct SetupArgs {
 }
 
 pub async fn run(args: SetupArgs) -> Result<()> {
-    if let Some(token) = args.invite {
+    if let Some(raw) = args.invite {
+        // Accept either a bare token or a full URL (.../invite/<token>)
+        let token = if raw.starts_with("http://") || raw.starts_with("https://") {
+            raw.trim_end_matches('/').split('/').last().unwrap_or(&raw).to_string()
+        } else {
+            raw
+        };
         run_invite(token).await
     } else {
         run_interactive().await
