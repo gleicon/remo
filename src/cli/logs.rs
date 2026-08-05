@@ -1,10 +1,11 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use crate::config::ClientConfig;
 
 #[derive(clap::Args)]
 pub struct LogsArgs {
-    pub app: String,
+    /// App name (optional — inferred from git remote when omitted)
+    pub app: Option<String>,
 
     /// Number of recent lines to fetch
     #[arg(long, default_value_t = 100)]
@@ -16,6 +17,12 @@ pub struct LogsArgs {
 }
 
 pub async fn run(args: LogsArgs) -> Result<()> {
+    let app = args.app
+        .or_else(crate::cli::detect_app_name)
+        .ok_or_else(|| anyhow::anyhow!(
+            "app name required (or run from inside a remo app directory)"
+        ))?;
+
     let cfg = ClientConfig::load()?;
     let client = {
         use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
@@ -28,15 +35,14 @@ pub async fn run(args: LogsArgs) -> Result<()> {
     };
 
     let res = client
-        .get(format!("{}/api/apps/{}/logs?lines={}", cfg.server_url, args.app, args.lines))
+        .get(format!("{}/api/apps/{}/logs?lines={}", cfg.server_url, app, args.lines))
         .send()
         .await?;
 
     if !res.status().is_success() {
-        anyhow::bail!("{}", res.text().await?);
+        bail!("{}", res.text().await?);
     }
 
-    let body = res.text().await?;
-    print!("{body}");
+    print!("{}", res.text().await?);
     Ok(())
 }

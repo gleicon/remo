@@ -50,6 +50,8 @@ enum Commands {
     Rollback(cli::deploy::RollbackArgs),
     /// Tail runtime logs
     Logs(cli::logs::LogsArgs),
+    /// Deploy current directory (git push remo main)
+    Push,
     /// git-hook — called by SSH forced command (internal)
     #[command(hide = true)]
     GitHook(cli::git_hook::GitHookArgs),
@@ -80,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Deployments(args) => cli::deploy::deployments(args).await,
         Commands::Rollback(args) => cli::deploy::rollback(args).await,
         Commands::Logs(args) => cli::logs::run(args).await,
+        Commands::Push => cli::push::run().await,
         Commands::GitHook(args) => cli::git_hook::run(args).await,
         Commands::Agent(args) => cli::agent::run(args).await,
     }

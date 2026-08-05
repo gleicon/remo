@@ -42,7 +42,8 @@ pub async fn run(cmd: AppsCmd) -> Result<()> {
 }
 
 async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
-    let base = ClientConfig::load()?.server_url;
+    let cfg = ClientConfig::load()?;
+    let base = &cfg.server_url;
     let res = client
         .post(format!("{base}/api/apps"))
         .json(&serde_json::json!({
@@ -59,17 +60,20 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
     }
 
     let app: serde_json::Value = res.json().await?;
+    let hostname = app["hostname"].as_str().unwrap_or(&args.name).to_string();
+
+    // SSH remote: ssh://host/appname (works with any standard SSH config)
     let host = base
         .trim_start_matches("https://")
         .trim_start_matches("http://")
         .split('/')
         .next()
-        .unwrap_or(&base);
-    let remote_url = format!("git@{host}:{}", args.name);
+        .unwrap_or(base.as_str());
+    let remote_url = format!("ssh://{host}/{}", args.name);
 
-    println!("Created: {}", app["hostname"].as_str().unwrap_or(&args.name));
+    println!("App:     {hostname}");
 
-    // If we're inside a git repo, add the remote automatically.
+    // Are we already inside a git repo?
     let in_git = std::process::Command::new("git")
         .args(["rev-parse", "--git-dir"])
         .stdout(std::process::Stdio::null())
@@ -79,23 +83,58 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
         .unwrap_or(false);
 
     if in_git {
+        // Already a repo — just add the remote.
         let added = std::process::Command::new("git")
             .args(["remote", "add", "remo", &remote_url])
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
         if added {
-            println!("Remote:  added 'remo' → {remote_url}");
-            println!("Push:    git push remo main");
+            println!("Remote:  remo → {remote_url}");
         } else {
-            println!("Remote:  {remote_url}  (remote 'remo' already exists — skipped)");
+            println!("Remote:  remo already exists (skipped)");
         }
+        println!("Deploy:  remo push");
     } else {
-        println!("Remote:  git remote add remo {remote_url}");
-        println!("Push:    git push remo main");
+        // Create directory, init repo, write starter file, initial commit.
+        std::fs::create_dir_all(&args.name)?;
+
+        // Write a minimal starter matching the entrypoint filename.
+        let starter = format!("{}/{}", args.name, args.entrypoint);
+        if !std::path::Path::new(&starter).exists() {
+            std::fs::write(&starter, starter_js(&args.name))?;
+            println!("Created: {starter}");
+        }
+
+        let run = |cmd: &str, a: &[&str]| {
+            std::process::Command::new(cmd)
+                .args(a)
+                .current_dir(&args.name)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        };
+
+        run("git", &["init", "-q"]);
+        run("git", &["add", "."]);
+        run("git", &["commit", "-q", "-m", "init"]);
+        run("git", &["remote", "add", "remo", &remote_url]);
+
+        println!("Remote:  remo → {remote_url}");
+        println!();
+        println!("  cd {} && remo push", args.name);
     }
 
     Ok(())
+}
+
+fn starter_js(name: &str) -> String {
+    format!(
+        r#"addEventListener("fetch", (event) => {{
+  event.respondWith(new Response("hello from {name}", {{ status: 200 }}));
+}});
+"#
+    )
 }
 
 async fn list(client: reqwest::Client) -> Result<()> {
