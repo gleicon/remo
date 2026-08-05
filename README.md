@@ -1,6 +1,6 @@
 # remo
 
-Single-VPS PaaS. `git push` deploys JS apps to a nano-rs V8 runtime. No Kubernetes, no Docker per app, no build step on the server.
+Single-VPS PaaS. `git push` deploys JS apps to a V8 runtime. No Kubernetes, no Docker per app, no build step.
 
 ```
 remo push  →  git archive  →  extract  →  symlink swap  →  nano-rs reload
@@ -10,7 +10,7 @@ Apps live at `https://{owner}-{app}.{domain}`. One nano-rs process routes all ap
 
 ---
 
-## How it works
+## Architecture
 
 ```
 laptop
@@ -22,115 +22,94 @@ laptop
       └── post-receive: extract → symlink → nano-rs reload
 
 VPS
-  nginx :443        →  nano-rs :8080  (app traffic, Host-header routing)
-  yourdomain.tld    →  remo API :7070 (CLI traffic)
-  nano-rs admin        :8889           (localhost only)
+  nginx :443      →  nano-rs :8080  (app traffic, Host-header routing)
+  yourdomain.tld  →  remo API :7070 (CLI traffic)
 ```
-
-See [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) for the full install walkthrough.
 
 ---
 
-## VPS install (Ubuntu 22.04+, Docker)
+## Get started
+
+### 1. Install the CLI
 
 ```bash
-# 1. Dependencies
-apt update && apt install -y docker.io docker-compose-v2 nginx certbot python3-certbot-nginx git
-systemctl enable --now docker nginx
-
-# 2. git user for SSH deploys
-useradd --system --uid 2000 --shell /bin/sh --no-create-home git
-usermod -p '*' git
-
-# 3. Data directories
-mkdir -p /var/lib/remo/{apps,git}
-touch /var/lib/remo/authorized_keys
-chown -R git:git /var/lib/remo
-chmod 750 /var/lib/remo
-
-# 4. sshd drop-in for git user
-cat > /etc/ssh/sshd_config.d/50-remo-git.conf << 'EOF'
-Match User git
-    AuthorizedKeysFile /var/lib/remo/authorized_keys
-    AllowTcpForwarding no
-    X11Forwarding no
-    PermitTTY no
-EOF
-systemctl reload ssh
-
-# 5. Clone and run the installer
-git clone https://github.com/gleicon/remo /home/ubuntu/remo
-cd /home/ubuntu/remo
-remo server install --docker --domain yourdomain.tld
-# → saves master_token to /etc/remo/master_token (copy it now)
-
-# 6. Start containers
-docker compose up -d
-
-# 7. Copy host binary (git-hook runs outside Docker)
-docker compose cp remo:/usr/local/bin/remo /usr/local/bin/remo
-remo --version
-
-# 8. nginx + TLS — see docs/SETUP_GUIDE.md §3
-```
-
-> DNS: add `*.yourdomain.tld A <VPS_IP>` and `yourdomain.tld A <VPS_IP>` before step 8.
-
----
-
-## Laptop setup
-
-```bash
-# Build from source (macOS or Linux)
 git clone https://github.com/gleicon/remo && cd remo
-make install   # cargo build --release + copy to /usr/local/bin/remo
-
-# First-time login (needs master token from /etc/remo/master_token on VPS)
-remo setup
-# prompts: server URL · admin or user · token · username · SSH key
+make install          # cargo build --release + copy to /usr/local/bin/remo
 ```
 
----
+### 2. Connect to a server
 
-## Deploy your first app
+```bash
+remo setup
+# prompts: server URL · admin or user · master/user token · username · SSH key
+```
+
+If you're setting up the server itself, see [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md).
+
+### 3. Deploy your first app
 
 ```bash
 remo apps create myapp
-# → creates myapp/ with starter index.js, git repo, and remo remote
-
 cd myapp
 remo push
-# → live at https://alice-myapp.yourdomain.tld
+# live at https://alice-myapp.yourdomain.tld
 ```
 
-Starter `index.js` (ES module, same as Cloudflare Workers):
+---
+
+## App templates
+
+`remo apps create` scaffolds a starter file, git repo, and remote.
+
+### JS (default) — ES module fetch handler
+
+```bash
+remo apps create myapi
+```
 
 ```javascript
 export default {
   fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/") {
-      return new Response("hello from myapp", { status: 200 });
+      return new Response("hello from myapi", { status: 200 });
     }
     return new Response("Not Found", { status: 404 });
   },
 };
 ```
 
-The `addEventListener("fetch", ...)` Service Worker pattern is also supported.
+### HTML — styled HTML page served from a JS worker
+
+```bash
+remo apps create mysite --html
+```
+
+Creates `index.js` with an HTML template literal. Edit the HTML in the file and `remo push`.
+
+### WASM — WebAssembly module wrapped in a JS worker
+
+```bash
+remo apps create mycalc --wasm
+```
+
+Ships with a working inline wasm module (`add(a, b)`). Hit `/add?a=2&b=3` immediately.
+To use your own: compile with `wasm-pack`, base64-encode the `.wasm`, replace `WASM_B64` in `index.js`.
+
+The `addEventListener("fetch", ...)` Service Worker pattern is also supported in all templates.
 
 ---
 
 ## Day-to-day
 
 ```bash
-remo apps list                        # list your apps
-remo push                             # deploy (from inside the app dir)
-remo logs                             # tail logs (infers app from git remote)
-remo env set KEY=value                # set env var
-remo env list                         # list env vars (values masked)
-remo env unset KEY                    # remove env var
-remo apps delete myapp                # delete app
+remo push                      # deploy (infers app from git remote)
+remo apps list                 # list your apps
+remo logs                      # tail logs
+remo env set KEY=value         # set env var
+remo env list                  # list env vars
+remo env unset KEY             # remove env var
+remo apps delete myapp         # delete app
 ```
 
 Commands that take an app name infer it from the git remote when run inside the app directory.
@@ -140,52 +119,21 @@ Commands that take an app name infer it from the git remote when run inside the 
 ## Invite a user
 
 ```bash
-remo users invite alice
-# prints a link and a one-liner — share either with Alice
+remo users invite alice        # prints a link + one-liner command
 ```
 
-Alice runs on her laptop:
-
-```bash
-remo setup --invite https://yourdomain.tld/invite/<token>
-# or
-remo setup --invite <token>
-```
+Alice runs `remo setup --invite <link-or-token>` on her laptop. See [docs/SETUP_GUIDE.md §6](docs/SETUP_GUIDE.md#6-invite-another-user-alice).
 
 ---
 
-## API
-
-`Authorization: Bearer <token>` on all endpoints. Admin endpoints need the master token.
-
-| Method | Path | Auth |
-|--------|------|------|
-| GET | `/health` | — |
-| POST | `/api/invites/{token}/claim` | — |
-| POST | `/api/apps` | user |
-| GET | `/api/apps` | user |
-| GET | `/api/apps/{name}` | user |
-| DELETE | `/api/apps/{name}` | user |
-| POST | `/api/apps/{name}/rollback` | user |
-| POST | `/api/apps/{name}/scale` | user |
-| GET/POST | `/api/apps/{name}/env` | user |
-| DELETE | `/api/apps/{name}/env/{key}` | user |
-| PUT/DELETE | `/api/apps/{name}/domain` | user |
-| GET | `/api/apps/{name}/logs` | user |
-| GET/POST/DELETE | `/api/users[/{name}]` | admin |
-| POST/GET | `/api/admin/invites` | admin |
-
----
-
-## Releasing / contributing
+## Contributing
 
 ```bash
-make test                          # run tests
-make build                         # cargo build --release
-make release VERSION=v0.5.0        # bump Cargo.toml, commit, tag, push → CI builds linux/amd64
-make deploy                        # rsync to VPS, rebuild container, update host binary
-make logs                          # follow remo logs on VPS
-make status                        # docker ps on VPS
+make test                       # run tests
+make release VERSION=v0.5.0     # bump version, tag, push → CI builds linux/amd64 binary
+make deploy                     # rsync to VPS, rebuild container, update host binary
 ```
 
-Override VPS settings: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_DIR`.
+VPS connection via `.make.env` (gitignored): `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_DIR`.
+
+API reference: [docs/DESIGN.md](docs/DESIGN.md#control-plane-api).

@@ -243,9 +243,17 @@ remo push
 
 Live at `https://alice-myapp.yourdomain.tld`.
 
-### Writing app code
+### App templates
 
-Apps use the ES module pattern (same as Cloudflare Workers):
+`remo apps create` accepts an optional template flag:
+
+| Flag | Starter | Use for |
+|------|---------|---------|
+| _(none)_ | ES module fetch handler | JSON APIs, routing logic |
+| `--html` | JS worker returning styled HTML | Static pages, landing pages |
+| `--wasm` | JS worker wrapping a wasm module | Compute-heavy logic, Rust/C output |
+
+Default JS template:
 
 ```javascript
 export default {
@@ -259,15 +267,7 @@ export default {
 };
 ```
 
-The Service Worker `addEventListener` pattern is also supported:
-
-```javascript
-addEventListener("fetch", (event) => {
-  event.respondWith(new Response("hello", { status: 200 }));
-});
-```
-
-Both patterns implement the WinterTC fetch interface. `request` is a standard [Request](https://developer.mozilla.org/en-US/docs/Web/API/Request) object; return a [Response](https://developer.mozilla.org/en-US/docs/Web/API/Response).
+The `addEventListener("fetch", ...)` Service Worker pattern is also supported. Both implement the [WinterTC fetch interface](https://wintercg.org/).
 
 ---
 
