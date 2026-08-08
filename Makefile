@@ -46,7 +46,7 @@ deploy:
 	  --exclude=target/ --exclude=.git/ --exclude='*.db' --exclude='.env' \
 	  -e "ssh -i $(VPS_SSH_KEY) -o StrictHostKeyChecking=no" \
 	  . $(VPS_USER)@$(VPS_HOST):$(VPS_DIR)/
-	$(SSH) "cd $(VPS_DIR) && sudo docker compose build --no-cache remo && sudo docker compose up -d remo"
+	$(SSH) "cd $(VPS_DIR) && sudo docker compose build --no-cache nano-rs remo && sudo docker compose up -d"
 	$(SSH) "cd $(VPS_DIR) && sudo docker compose cp remo:/usr/local/bin/remo /usr/local/bin/remo && remo --version"
 
 logs:
