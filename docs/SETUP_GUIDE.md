@@ -252,6 +252,8 @@ Live at `https://alice-myapp.yourdomain.tld`.
 | _(none)_ | ES module fetch handler | JSON APIs, routing logic |
 | `--html` | JS worker returning styled HTML | Static pages, landing pages |
 | `--wasm` | JS worker wrapping a wasm module | Compute-heavy logic, Rust/C output |
+| `--kv` | Persistent counter via `nano:kv` | Apps that need state across requests |
+| `--spa` | HTML shell + localStorage shim | Browser-compatible SPAs |
 
 Default JS template:
 
@@ -268,6 +270,44 @@ export default {
 ```
 
 The `addEventListener("fetch", ...)` Service Worker pattern is also supported. Both implement the [WinterTC fetch interface](https://wintercg.org/).
+
+### nano:kv — persistent storage
+
+Apps built with `--kv` or `--spa` use `nano:kv`, nano-rs's built-in EdgeStore-backed key-value store. No setup required — it is available to every app automatically.
+
+```javascript
+import { kv, openKV } from 'nano:kv';
+
+// Default namespace (scoped to this app's hostname automatically)
+await kv.set('counter', new TextEncoder().encode('1'));
+const raw = await kv.get('counter');
+
+// JSON convenience methods
+await kv.setJSON('config', { version: 2 });
+const cfg = await kv.getJSON('config');
+
+// Named namespaces — useful for separating concerns within one app
+const cache = openKV('cache');
+const sessions = openKV('sessions');
+await cache.setJSON('user:1', { name: 'Alice' });
+```
+
+Keys are automatically namespaced as `{hostname}::{kv_name}`, so apps on different hostnames never collide.
+
+KV data is stored on disk at `/var/lib/remo/.nano-kv` and persists across container restarts.
+
+### localStorage shim
+
+The `--spa` template ships an async `localStorage` shim built on `nano:kv`. Browser code using `localStorage.getItem / setItem / removeItem` works without modification:
+
+```javascript
+import { openKV } from 'nano:kv';
+// shim sets globalThis.localStorage — same API as browsers
+await localStorage.setItem('theme', 'dark');
+const theme = await localStorage.getItem('theme');
+```
+
+Note: `localStorage` in nano-rs is async (returns Promises) unlike the synchronous browser API.
 
 ---
 

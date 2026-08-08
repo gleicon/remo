@@ -21,12 +21,20 @@ pub struct CreateArgs {
     pub name: String,
 
     /// Scaffold an HTML-serving JS worker instead of the default API starter
-    #[arg(long, conflicts_with = "wasm")]
+    #[arg(long, conflicts_with_all = ["wasm", "kv", "spa"])]
     pub html: bool,
 
     /// Scaffold a WebAssembly starter (JS wrapper + inline wasm module)
-    #[arg(long, conflicts_with = "html")]
+    #[arg(long, conflicts_with_all = ["html", "kv", "spa"])]
     pub wasm: bool,
+
+    /// Scaffold a persistent key-value counter app using nano:kv
+    #[arg(long, conflicts_with_all = ["html", "wasm", "spa"])]
+    pub kv: bool,
+
+    /// Scaffold a browser-compatible SPA shell with localStorage (backed by nano:kv)
+    #[arg(long, conflicts_with_all = ["html", "wasm", "kv"])]
+    pub spa: bool,
 
     /// App type: js | wasm | static (overridden by --html/--wasm)
     #[arg(long = "type", default_value = "js")]
@@ -49,17 +57,20 @@ pub async fn run(cmd: AppsCmd) -> Result<()> {
     }
 }
 
-enum Template { Js, Html, Wasm }
+enum Template { Js, Html, Wasm, Kv, Spa }
 
 async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
     let cfg = ClientConfig::load()?;
     let base = &cfg.server_url;
 
-    let template = if args.wasm { Template::Wasm } else if args.html { Template::Html } else { Template::Js };
+    let template = if args.wasm { Template::Wasm }
+        else if args.html { Template::Html }
+        else if args.kv   { Template::Kv }
+        else if args.spa  { Template::Spa }
+        else              { Template::Js };
     let (app_type, entrypoint) = match &template {
-        Template::Wasm => ("js".to_string(), "index.js".to_string()),
-        Template::Html => ("js".to_string(), "index.js".to_string()),
-        Template::Js   => (args.app_type.clone(), args.entrypoint.clone()),
+        Template::Js => (args.app_type.clone(), args.entrypoint.clone()),
+        _            => ("js".to_string(), "index.js".to_string()),
     };
 
     let res = client
@@ -115,15 +126,11 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
         std::fs::create_dir_all(&args.name)?;
 
         let files: Vec<(&str, String)> = match &template {
-            Template::Html => vec![
-                ("index.js", starter_html(&args.name)),
-            ],
-            Template::Wasm => vec![
-                ("index.js", starter_wasm(&args.name)),
-            ],
-            Template::Js => vec![
-                (&entrypoint, starter_js(&args.name)),
-            ],
+            Template::Html => vec![("index.js", starter_html(&args.name))],
+            Template::Wasm => vec![("index.js", starter_wasm(&args.name))],
+            Template::Kv   => vec![("index.js", starter_kv(&args.name))],
+            Template::Spa  => vec![("index.js", starter_spa(&args.name))],
+            Template::Js   => vec![(&entrypoint, starter_js(&args.name))],
         };
 
         for (filename, content) in &files {
@@ -203,6 +210,119 @@ export default {{
   }},
 }};
 "#
+    )
+}
+
+fn starter_kv(name: &str) -> String {
+    format!(
+        r#"// Persistent request counter — survives restarts via nano:kv.
+// Docs: https://github.com/gleicon/nano-rs
+import {{ kv }} from 'nano:kv';
+
+export default {{
+  async fetch(request) {{
+    const url = new URL(request.url);
+
+    if (url.pathname === '/reset' && request.method === 'POST') {{
+      await kv.set('hits', new TextEncoder().encode('0'));
+      return new Response(JSON.stringify({{ hits: 0 }}), {{
+        headers: {{ 'content-type': 'application/json' }},
+      }});
+    }}
+
+    const raw = await kv.get('hits');
+    const hits = raw ? parseInt(new TextDecoder().decode(raw), 10) : 0;
+    const next = hits + 1;
+    await kv.set('hits', new TextEncoder().encode(String(next)));
+
+    return new Response(
+      JSON.stringify({{ app: '{name}', hits: next }}),
+      {{ status: 200, headers: {{ 'content-type': 'application/json' }} }},
+    );
+  }},
+}};
+"#
+    )
+}
+
+fn starter_spa(name: &str) -> String {
+    format!(
+        r#"// SPA shell — uses localStorage (backed by nano:kv) for browser-compatible storage.
+// localStorage.getItem/setItem/removeItem work just like in a browser.
+import {{ openKV }} from 'nano:kv';
+
+// ── localStorage shim over nano:kv ───────────────────────────────────────────
+const store = openKV('localStorage');
+const localStorage = {{
+  async getItem(key) {{
+    const b = await store.get(String(key));
+    return b ? new TextDecoder().decode(b) : null;
+  }},
+  async setItem(key, value) {{
+    await store.set(String(key), new TextEncoder().encode(String(value)));
+  }},
+  async removeItem(key) {{
+    await store.delete(String(key));
+  }},
+}};
+globalThis.localStorage = localStorage;
+
+// ── HTML shell ───────────────────────────────────────────────────────────────
+const shell = (count, theme) => `<!DOCTYPE html>
+<html lang="en" data-theme="${{theme}}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{name}</title>
+  <style>
+    [data-theme=dark]  {{ background:#111; color:#eee; }}
+    [data-theme=light] {{ background:#fff; color:#111; }}
+    body {{ font-family: sans-serif; max-width: 480px; margin: 4rem auto; padding: 0 1rem; }}
+    button {{ margin: .5rem .25rem; padding: .4rem .9rem; cursor: pointer; }}
+  </style>
+</head>
+<body>
+  <h1>{name}</h1>
+  <p>Visits: <strong id="count">${{count}}</strong></p>
+  <p>Theme: <strong id="theme">${{theme}}</strong></p>
+  <button onclick="fetch('/theme?t=dark').then(()=>location.reload())">Dark</button>
+  <button onclick="fetch('/theme?t=light').then(()=>location.reload())">Light</button>
+  <button onclick="fetch('/reset',{{method:'POST'}}).then(()=>location.reload())">Reset</button>
+</body>
+</html>`;
+
+// ── Request handler ───────────────────────────────────────────────────────────
+export default {{
+  async fetch(request) {{
+    const url = new URL(request.url);
+
+    if (url.pathname === '/theme') {{
+      const t = url.searchParams.get('t') === 'dark' ? 'dark' : 'light';
+      await localStorage.setItem('theme', t);
+      return new Response(null, {{ status: 204 }});
+    }}
+
+    if (url.pathname === '/reset' && request.method === 'POST') {{
+      await localStorage.removeItem('visits');
+      return new Response(null, {{ status: 204 }});
+    }}
+
+    if (url.pathname === '/') {{
+      const raw = await localStorage.getItem('visits');
+      const visits = raw ? parseInt(raw, 10) : 0;
+      await localStorage.setItem('visits', String(visits + 1));
+      const theme = (await localStorage.getItem('theme')) ?? 'light';
+      return new Response(shell(visits + 1, theme), {{
+        status: 200,
+        headers: {{ 'content-type': 'text/html; charset=utf-8' }},
+      }});
+    }}
+
+    return new Response('Not Found', {{ status: 404 }});
+  }},
+}};
+"#,
+        name = name
     )
 }
 

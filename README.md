@@ -96,6 +96,31 @@ remo apps create mycalc --wasm
 Ships with a working inline wasm module (`add(a, b)`). Hit `/add?a=2&b=3` immediately.
 To use your own: compile with `wasm-pack`, base64-encode the `.wasm`, replace `WASM_B64` in `index.js`.
 
+### KV — persistent key-value counter (nano:kv)
+
+```bash
+remo apps create mycounter --kv
+```
+
+Imports `nano:kv`, increments a counter on every request. Persists across restarts. Keys are automatically namespaced to the app hostname so tenants can't collide.
+
+```javascript
+import { kv } from 'nano:kv';
+const raw = await kv.get('hits');
+const next = (raw ? parseInt(new TextDecoder().decode(raw)) : 0) + 1;
+await kv.set('hits', new TextEncoder().encode(String(next)));
+```
+
+Also available: `kv.getJSON / setJSON`, `openKV('namespace')` for multiple named stores, `kv.list(prefix)`.
+
+### SPA — browser-compatible shell with localStorage
+
+```bash
+remo apps create myapp --spa
+```
+
+Uses a `localStorage` shim built on `nano:kv` so code written for browsers works unchanged. Serves an HTML page that stores visit count and theme preference, toggled by buttons that call back to the same worker.
+
 The `addEventListener("fetch", ...)` Service Worker pattern is also supported in all templates.
 
 ---

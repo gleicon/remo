@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
         python3 \
     && rm -rf /var/lib/apt/lists/*
 
-ARG NANO_RS_VERSION=v2.2.7
+ARG NANO_RS_VERSION=v2.3.0
 RUN git clone --depth 1 --branch ${NANO_RS_VERSION} https://github.com/gleicon/nano-rs.git /build/nano-rs
 WORKDIR /build/nano-rs
 RUN cargo build --release
@@ -21,6 +21,9 @@ RUN apt-get update && apt-get install -y ca-certificates wget && rm -rf /var/lib
 COPY --from=builder /build/nano-rs/target/release/nano-rs /usr/local/bin/nano-rs
 COPY nano.json /etc/nano-rs/nano.json
 COPY placeholder/ /etc/nano-rs/placeholder/
+
+# KV engine uses current_dir()/.nano-kv — set to the mounted data volume for persistence.
+WORKDIR /var/lib/remo
 
 EXPOSE 8080 8889
 # Default runs without config (empty registry + admin API on :8889).
