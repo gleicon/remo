@@ -1,23 +1,18 @@
+FROM rust:1.88-slim AS builder
+
+RUN apt-get update && apt-get install -y \
+        pkg-config libssl-dev ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG NANO_RS_VERSION=v2.3.1
+RUN git clone --depth 1 --branch ${NANO_RS_VERSION} https://github.com/gleicon/nano-rs.git /build/nano-rs
+WORKDIR /build/nano-rs
+RUN cargo build --release
+
 FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
-ARG NANO_RS_VERSION=v2.3.0
-ARG TARGETARCH=amd64
-
-RUN apt-get update && apt-get install -y ca-certificates wget && rm -rf /var/lib/apt/lists/*
-
-RUN set -e; \
-    case "${TARGETARCH}" in \
-      amd64) ARCH=x86_64-unknown-linux-gnu ;; \
-      arm64) ARCH=aarch64-unknown-linux-gnu ;; \
-      *) echo "Unsupported arch: ${TARGETARCH}" && exit 1 ;; \
-    esac; \
-    wget -qO /tmp/nano-rs.tar.gz \
-      "https://github.com/gleicon/nano-rs/releases/download/${NANO_RS_VERSION}/nano-rs-${NANO_RS_VERSION}-${ARCH}.tar.gz" && \
-    tar -xzf /tmp/nano-rs.tar.gz -C /usr/local/bin && \
-    chmod +x /usr/local/bin/nano-rs && \
-    rm /tmp/nano-rs.tar.gz && \
-    nano-rs --version
-
+COPY --from=builder /build/nano-rs/target/release/nano-rs /usr/local/bin/nano-rs
 COPY nano.json /etc/nano-rs/nano.json
 COPY placeholder/ /etc/nano-rs/placeholder/
 

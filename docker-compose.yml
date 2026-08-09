@@ -7,6 +7,7 @@ services:
     command: ["nano-rs", "run"]
     environment:
       NANO_ADMIN_API_KEY: "${NANO_ADMIN_API_KEY}"
+      NANO_ADMIN_HOST: "0.0.0.0"
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:8889:8889"
