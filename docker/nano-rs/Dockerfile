@@ -1,6 +1,6 @@
 FROM debian:bookworm-slim
 
-ARG NANO_RS_VERSION=v2.3.1
+ARG NANO_RS_VERSION=v2.3.2
 ARG TARGETARCH=amd64
 
 RUN apt-get update && apt-get install -y ca-certificates wget && rm -rf /var/lib/apt/lists/*
