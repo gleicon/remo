@@ -2,12 +2,13 @@ services:
   nano-rs:
     build: ./docker/nano-rs
     restart: unless-stopped
-    # No --config flag: starts with empty registry + admin API on :8889.
-    # remo pushes app registrations via admin API after each deploy.
+    # No --config flag: empty registry on start; remo registers apps via admin API.
+    # NANO_HOST / NANO_ADMIN_HOST must be 0.0.0.0 in Docker for port mapping to work.
     command: ["nano-rs", "run"]
     environment:
       NANO_ADMIN_API_KEY: "${NANO_ADMIN_API_KEY}"
       NANO_ADMIN_HOST: "0.0.0.0"
+      NANO_HOST: "0.0.0.0"
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:8889:8889"
