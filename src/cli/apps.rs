@@ -34,14 +34,6 @@ pub struct CreateArgs {
     pub kv: bool,
     #[arg(long, conflicts_with = "template", hide = true)]
     pub spa: bool,
-
-    /// App type: js | wasm | static
-    #[arg(long = "type", default_value = "js")]
-    pub app_type: String,
-
-    /// Entry point file
-    #[arg(long, default_value = "index.js")]
-    pub entrypoint: String,
 }
 
 pub async fn run(cmd: AppsCmd) -> Result<()> {
@@ -431,9 +423,8 @@ export default {
 
 fn starter_gas(name: &str) -> String {
     format!(
-        r#"// Google Apps Script-compatible handler — runs unchanged on nano-rs via nano:gas.
-// Set GAS_COMPAT=true in remo env vars to auto-wrap this file.
-// Docs: https://github.com/gleicon/nano-rs
+        r#"// Google Apps Script-compatible handler — runs on nano-rs via nano:gas shim.
+// Deploy with: remo apps create myapp --template gas && remo push
 
 function doGet(e) {{
   return ContentService

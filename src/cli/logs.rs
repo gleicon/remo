@@ -10,10 +10,6 @@ pub struct LogsArgs {
     /// Number of recent lines to fetch
     #[arg(long, default_value_t = 100)]
     pub lines: u64,
-
-    /// Follow (not yet implemented)
-    #[arg(short, long)]
-    pub follow: bool,
 }
 
 pub async fn run(args: LogsArgs) -> Result<()> {

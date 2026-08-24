@@ -2,16 +2,13 @@
 
 ## Now
 
-**State:** Core control plane done. Builds clean. All API endpoints implemented. Hostname scheme: `{owner}-{name}.{domain}` with optional `custom_domain` CNAME. Env pipeline complete: base64 in DB, decoded on deploy, pushed to nano-rs via admin API. Token auth: SHA-256 O(1) lookup (bcrypt removed). Validation shared via `src/validation.rs`. 12 validation tests pass.
+**State:** remo v0.4.9, standalone repo at gleicon/remo. Control plane live on VPS. nano-rs v2.7.0 (binary-download Dockerfile, ~5s build). Template system: `--template NAME` with user dir `~/.remo/templates/<name>/`. Deploy durability: `reload_nano` failure is non-fatal; sync loop re-registers on recovery.
 
-**Next:** Commit all changes, then extract remo into its own git repo via `git subtree split --prefix=remo -b remo-split` from the parent nano-rs repo.
-
-**Open questions:**
-- Proxy backends (nginx/Caddy) not yet wired — `ProxyBackend` trait exists in `src/proxy/` but neither `write_vhost` nor on-demand TLS is called during deploy. Needed before production.
-- `deployment_create` / `deployment_update_status` in db.rs exist but are never called — deploy flow doesn't write deployment rows yet.
-- Custom domain: proxy must serve both canonical hostname and `custom_domain` — not yet implemented in proxy layer.
-- `remo server install` subcommand not yet implemented (CLI scaffolded, implementation missing).
-- nano-rs admin socket path configured via `ServerConfig.nano_socket` — must match nano-rs deploy.
+**Open gaps (Phase 6):**
+- `ProxyBackend` trait in `src/proxy/` — fully implemented but never called from deploy or API. Needed for custom domain TLS.
+- `deployment_create` never called — `remo logs myapp` always returns empty.
+- `remo server install` CLI scaffolded, not implemented.
+- `remo logs --follow` removed (was silent no-op); streaming logs not yet built.
 
 ---
 
@@ -50,10 +47,9 @@
 - [ ] Proxy serves both canonical + custom domain (nginx/Caddy config generation)
 
 ### Phase 5 — Git repo extraction
-- [ ] Commit all changes in nano-rs parent repo
-- [ ] `git subtree split --prefix=remo -b remo-split`
-- [ ] Push remo-split to standalone repo (URL TBD)
-- [ ] Update remote in SETUP_GUIDE.md
+- [x] Commit all changes in nano-rs parent repo
+- [x] Push remo as standalone repo: github.com/gleicon/remo
+- [x] SETUP_GUIDE.md updated with correct repo URL
 
 ### Phase 6 — Production gaps (post-split)
 - [ ] `remo server install` implementation
