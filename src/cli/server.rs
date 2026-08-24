@@ -28,6 +28,11 @@ pub enum ServerCmd {
         /// App name
         app: String,
     },
+    /// Wire nginx vhost + TLS for the remoapps landing site (run as root on VPS)
+    WireSite {
+        /// Public domain for the landing site (e.g. remoapps.site)
+        domain: String,
+    },
 }
 
 #[derive(clap::Args)]
@@ -69,6 +74,7 @@ pub async fn run(cmd: ServerCmd) -> Result<()> {
         ServerCmd::Doctor => doctor().await,
         ServerCmd::AddKey { user, key } => add_key(user, key),
         ServerCmd::ApplyDomain { app } => apply_domain(app).await,
+        ServerCmd::WireSite { domain } => wire_site(domain).await,
     }
 }
 
@@ -727,3 +733,58 @@ async fn apply_domain(app_name: String) -> Result<()> {
     Ok(())
 }
 
+async fn wire_site(site_domain: String) -> Result<()> {
+    use std::process::Command;
+    use anyhow::Context;
+
+    let cfg = ServerConfig::load()?;
+
+    // Proxy the landing site domain straight to the remo control plane.
+    // No Host-header rewrite needed — remo serves GET / directly.
+    let vhost_path = "/etc/nginx/sites-enabled/remo-site.conf";
+    let vhost = format!(
+        "# remoapps landing site — managed by remo server wire-site\n\
+         server {{\n\
+             listen 80;\n\
+             server_name {site_domain};\n\
+             location / {{\n\
+                 proxy_pass http://127.0.0.1:{port};\n\
+                 proxy_set_header Host $host;\n\
+                 proxy_set_header X-Real-IP $remote_addr;\n\
+                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n\
+                 proxy_set_header X-Forwarded-Proto $scheme;\n\
+             }}\n\
+         }}\n",
+        port = cfg.control_port,
+    );
+    std::fs::write(vhost_path, &vhost)?;
+    println!("  wrote {vhost_path}");
+
+    let test = Command::new("nginx").arg("-t").status().context("nginx not found")?;
+    if !test.success() {
+        anyhow::bail!("nginx config test failed — check nginx error log");
+    }
+    Command::new("systemctl").args(["reload", "nginx"]).status()?;
+    println!("  nginx reloaded");
+
+    let certbot = Command::new("certbot")
+        .args([
+            "--nginx",
+            "-d", &site_domain,
+            "--non-interactive",
+            "--agree-tos",
+            "-m", &format!("admin@{}", cfg.domain),
+        ])
+        .status()
+        .context("certbot not found — install with: apt install certbot python3-certbot-nginx")?;
+    if !certbot.success() {
+        anyhow::bail!(
+            "certbot failed for {} — ensure the DNS A record points to this VPS before running this command",
+            site_domain
+        );
+    }
+
+    println!("  TLS provisioned for {site_domain}");
+    println!("\nlanding site is live at https://{site_domain}");
+    Ok(())
+}

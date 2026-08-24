@@ -65,9 +65,14 @@ fn safe_join(
 
 pub fn public_routes() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/", get(landing))
         .route("/health", get(health))
         .route("/waitlist", post(waitlist_submit))
         .route("/api/invites/{token}/claim", post(invite_claim))
+}
+
+async fn landing() -> impl IntoResponse {
+    axum::response::Html(include_str!("../static/index.html"))
 }
 
 async fn health() -> impl IntoResponse {
