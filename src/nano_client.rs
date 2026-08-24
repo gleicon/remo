@@ -96,6 +96,26 @@ impl NanoClient {
         check_status(res).await
     }
 
+    // ── Observability ─────────────────────────────────────────────────────
+
+    /// Fetch live isolate stats from nano-rs (V8 heap + request count per worker).
+    /// Returns the raw JSON array from /admin/isolates.
+    pub async fn get_isolates(&self) -> Result<serde_json::Value> {
+        let res = self
+            .client
+            .get(format!("{}/admin/isolates", self.base))
+            .send()
+            .await?;
+        if !res.status().is_success() {
+            anyhow::bail!(
+                "nano-rs /admin/isolates {}: {}",
+                res.status(),
+                res.text().await.unwrap_or_default()
+            );
+        }
+        Ok(res.json().await?)
+    }
+
     // ── Env ───────────────────────────────────────────────────────────────
 
     pub async fn set_env(&self, hostname: &str, vars: Vec<(String, String)>) -> Result<()> {

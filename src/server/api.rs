@@ -83,6 +83,7 @@ pub fn user_routes() -> Router<Arc<AppState>> {
         .route("/api/apps/{name}/rollback", post(apps_rollback))
         .route("/api/apps/{name}/scale", post(apps_scale))
         .route("/api/apps/{name}/drain", post(apps_drain))
+        .route("/api/apps/{name}/stats", get(app_stats))
         .route("/api/apps/{name}/env", get(env_list).post(env_set))
         .route("/api/apps/{name}/env/{key}", delete(env_unset))
         .route("/api/apps/{name}/domain", put(domain_set).delete(domain_unset))
@@ -325,6 +326,30 @@ async fn apps_drain(
     let nano = crate::nano_client::NanoClient::from_config(&state.cfg);
     nano.drain_app(&app.hostname).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn app_stats(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthUser>,
+    Path(name): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    validate_app_name(&name)?;
+    let app = db::app_get(&state.pool, &name).await?.ok_or(ApiError::NotFound)?;
+    check_ownership(&auth, &app.owner)?;
+    let nano = crate::nano_client::NanoClient::from_config(&state.cfg);
+    let all_isolates = nano.get_isolates().await.unwrap_or(serde_json::json!([]));
+    let app_isolates: Vec<_> = all_isolates
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter(|i| i["hostname"].as_str() == Some(&app.hostname))
+        .cloned()
+        .collect();
+    Ok(Json(serde_json::json!({
+        "hostname": app.hostname,
+        "current_sha": app.current_sha,
+        "isolates": app_isolates,
+    })))
 }
 
 // ── Env ───────────────────────────────────────────────────────────────────────

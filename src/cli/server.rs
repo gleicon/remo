@@ -23,6 +23,11 @@ pub enum ServerCmd {
         #[arg(long)]
         key: String,
     },
+    /// Provision nginx vhost + TLS cert for a custom domain (run as root on VPS after `remo domain set`)
+    ApplyDomain {
+        /// App name
+        app: String,
+    },
 }
 
 #[derive(clap::Args)]
@@ -63,6 +68,7 @@ pub async fn run(cmd: ServerCmd) -> Result<()> {
         ServerCmd::Status => status().await,
         ServerCmd::Doctor => doctor().await,
         ServerCmd::AddKey { user, key } => add_key(user, key),
+        ServerCmd::ApplyDomain { app } => apply_domain(app).await,
     }
 }
 
@@ -213,6 +219,7 @@ async fn install(args: InstallArgs) -> Result<()> {
         println!("  wrote {env_path} (NANO_ADMIN_API_KEY)");
     } else {
         write_proxy_config(&args.domain, &args.proxy)?;
+        write_systemd_unit()?;
     }
 
     println!();
@@ -233,6 +240,9 @@ async fn install(args: InstallArgs) -> Result<()> {
     } else {
         println!("nano-rs admin key (set NANO_ADMIN_API_KEY in nano-rs environment):");
         println!("  {nano_admin_key}");
+        println!();
+        println!("Enable and start the remo service:");
+        println!("  systemctl daemon-reload && systemctl enable --now remo");
         println!();
         println!("Login from your laptop:");
         println!("  remo login --server https://remo.{} --token <token>", args.domain);
@@ -637,5 +647,83 @@ fn check_caddy() -> Vec<Check> {
     }
 
     out
+}
+
+fn write_systemd_unit() -> Result<()> {
+    let unit_path = "/etc/systemd/system/remo.service";
+    let unit = "[Unit]\nDescription=remo control plane\nAfter=network.target\n\n\
+                [Service]\nExecStart=/usr/local/bin/remo server start\nRestart=on-failure\nUser=root\n\n\
+                [Install]\nWantedBy=multi-user.target\n";
+    std::fs::write(unit_path, unit)?;
+    println!("  wrote {unit_path}");
+    Ok(())
+}
+
+async fn apply_domain(app_name: String) -> Result<()> {
+    use std::process::Command;
+    use anyhow::Context;
+
+    let cfg = ServerConfig::load()?;
+    let db_path = format!("{}/state.db", cfg.data_dir);
+    let pool = crate::db::open(&db_path).await?;
+
+    let app = crate::db::app_get(&pool, &app_name).await?
+        .ok_or_else(|| anyhow::anyhow!("app '{}' not found", app_name))?;
+
+    let custom_domain = app.custom_domain.ok_or_else(|| {
+        anyhow::anyhow!(
+            "no custom domain set for '{}' — run: remo domain set {} <domain>",
+            app_name, app_name
+        )
+    })?;
+
+    // nginx rewrites the Host header to the canonical hostname before proxying
+    // to nano-rs, so nano-rs never needs to know about the custom domain.
+    let canonical = app.hostname;
+    let vhost_path = format!("/etc/nginx/sites-enabled/remo-custom-{}.conf", app_name);
+    let vhost = format!(
+        "# remo custom domain — managed by remo server apply-domain\n\
+         server {{\n\
+             listen 80;\n\
+             server_name {custom_domain};\n\
+             location / {{\n\
+                 proxy_pass http://127.0.0.1:8080;\n\
+                 proxy_set_header Host {canonical};\n\
+                 proxy_set_header X-Real-IP $remote_addr;\n\
+                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n\
+                 proxy_set_header X-Forwarded-Proto $scheme;\n\
+             }}\n\
+         }}\n"
+    );
+    std::fs::write(&vhost_path, &vhost)?;
+    println!("  wrote {vhost_path}");
+
+    let test = Command::new("nginx").arg("-t").status().context("nginx not found")?;
+    if !test.success() {
+        anyhow::bail!("nginx config test failed — check nginx error log");
+    }
+    Command::new("systemctl").args(["reload", "nginx"]).status()?;
+    println!("  nginx reloaded");
+
+    let certbot = Command::new("certbot")
+        .args([
+            "--nginx",
+            "-d", &custom_domain,
+            "--non-interactive",
+            "--agree-tos",
+            "-m", &format!("admin@{}", cfg.domain),
+        ])
+        .status()
+        .context("certbot not found — install with: apt install certbot python3-certbot-nginx")?;
+    if !certbot.success() {
+        anyhow::bail!(
+            "certbot failed for {} — ensure the DNS A record points to this VPS before running this command",
+            custom_domain
+        );
+    }
+
+    println!("  TLS provisioned for {custom_domain}");
+    println!("\n{app_name} is live at https://{custom_domain}");
+    Ok(())
 }
 
