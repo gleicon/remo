@@ -1,6 +1,6 @@
 [package]
 name = "remo"
-version = "0.4.8"
+version = "0.4.9"
 edition = "2021"
 description = "remo — edge PaaS on nano-rs"
 license = "MIT"
