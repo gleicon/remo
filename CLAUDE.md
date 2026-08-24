@@ -62,19 +62,29 @@ Vars stored base64-encoded in `env_vars` table. `env_list_decoded()` decodes on 
 
 ## Hostname scheme
 
-`{owner}-{name}.{domain}` — enforced at app create. Prevents two users from squatting the same subdomain. Custom CNAME in `custom_domain` column. `PUT /api/apps/:name/domain` sets it; `DELETE` clears. Proxy layer must serve both (not yet implemented).
+`{owner}-{name}.{domain}` — enforced at app create. Prevents two users from squatting the same subdomain. Custom CNAME in `custom_domain` column. `PUT /api/apps/:name/domain` sets it and triggers `proxy.provision_cert(domain)`; `DELETE` clears it and calls `proxy.remove_cert(domain)`. Proxy serves both hostnames via nginx — canonical via wildcard cert, custom domain via per-cert nginx vhost.
 
 ## Deploy limits
 
 `MAX_DEPLOY_BYTES` in `src/deploy/mod.rs` caps the tar archive at 10 MB. Checked before SHA hashing or disk I/O — user gets a clear error at `git push`. Recompile to change. nano-rs should carry its own higher ceiling (defense-in-depth) as a separate compile-time constant; remo is the policy layer.
 
-## What's not done yet (production gaps)
+## Proxy config for custom domains
 
-- Proxy config generation (nginx vhost / Caddy config written on app create/delete/domain change)
-- Deployment rows written to DB on git-push
-- `nano.json` parsed in deploy hook for app_type/entrypoint override
-- Systemd unit generation
-- Log streaming (`remo logs` tails nano-rs JSON filtered by hostname)
+Canonical subdomains (`{owner}-{name}.{domain}`) are covered by the wildcard cert written by `remo server install` — no per-app action needed.
+
+Custom domains (`PUT /api/apps/:name/domain`) call `ProxyBackend::provision_cert(domain)`. In Docker mode (bind_addr=0.0.0.0) this is a no-op with a warning; certbot must be run manually on the host. In bare-VPS mode, NginxBackend writes the vhost and calls certbot automatically.
+
+On `apps_delete` and `domain_unset`, `remove_cert` is called non-fatally.
+
+## Deployment history
+
+Every `git push` writes a deployment row to the `deployments` table: `pending` → `success`/`failed` with the content-addressed sha. `remo logs myapp` and `remo deployments myapp` show this history. `remo rollback myapp` uses deployment sha to swap the `current/` symlink.
+
+## Known gaps
+
+- `nano.json` in the app root (entrypoint/type override at push time) — not yet parsed
+- Log streaming (`remo logs --follow`) — not implemented; `remo logs` shows deployment history, not runtime output
+- Systemd unit generation — Docker-only setup doesn't need it
 
 ## Dev workflow
 

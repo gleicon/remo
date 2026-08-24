@@ -42,10 +42,11 @@ pub async fn deployments(args: DeploymentsArgs) -> Result<()> {
     let deploys: Vec<serde_json::Value> = res.json().await?;
     for d in &deploys {
         println!(
-            "{} {} {}",
-            d["id"].as_str().unwrap_or("?"),
-            d["status"].as_str().unwrap_or("?"),
+            "{}  sha={}  {}  {}",
             d["created_at"].as_str().unwrap_or(""),
+            d["sha"].as_str().unwrap_or("-"),
+            d["deployer"].as_str().unwrap_or("?"),
+            d["status"].as_str().unwrap_or("?"),
         );
     }
     Ok(())

@@ -52,9 +52,12 @@
 - [x] SETUP_GUIDE.md updated with correct repo URL
 
 ### Phase 6 — Production gaps (post-split)
-- [ ] `remo server install` implementation
-- [ ] Proxy config generation called on app create/delete/domain-change
-- [ ] Write deployment rows on git-push deploy
-- [ ] `nano.json` parsing in deploy hook (app_type, entrypoint override)
-- [ ] Systemd unit file generation
-- [ ] `remo logs` tail (stream nano-rs structured JSON filtered by hostname)
+- [x] `remo server install` implementation
+- [x] Proxy wired for custom domain TLS (NoopProxy in Docker mode; NginxBackend on bare VPS)
+- [x] app_delete deregisters from nano-rs + cleans up custom domain cert
+- [x] Deployment rows written on git-push (pending → success/failed + sha)
+- [x] `remo logs` and `remo deployments` return real data with sha and timestamps
+- [x] Rollback fixed to compare deployment sha (not UUID) against current_sha
+- [ ] `nano.json` in app root (entrypoint/type override) — deferred
+- [ ] `remo logs --follow` (streaming) — deferred; current logs show deployment history
+- [ ] Systemd unit generation — not needed for Docker-based VPS

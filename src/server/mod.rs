@@ -14,6 +14,7 @@ pub struct AppState {
     pub pool: sqlx::SqlitePool,
     pub cfg: ServerConfig,
     pub master_token: String,
+    pub proxy: std::sync::Arc<dyn crate::proxy::ProxyBackend>,
 }
 
 pub async fn start(port: u16) -> Result<()> {
@@ -29,7 +30,8 @@ pub async fn start(port: u16) -> Result<()> {
     }
 
     let bind_addr = cfg.bind_addr.clone();
-    let state = Arc::new(AppState { pool, cfg, master_token });
+    let proxy = crate::proxy::from_config(&cfg);
+    let state = Arc::new(AppState { pool, cfg, master_token, proxy });
 
     // Re-register all deployed apps with nano-rs on startup.
     // nano-rs is stateless; remo is the source of truth.

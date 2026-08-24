@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{delete, get, post, put},
@@ -204,6 +204,22 @@ async fn apps_delete(
         .await?
         .ok_or(ApiError::NotFound)?;
     check_ownership(&auth, &app.owner)?;
+
+    // Deregister from nano-rs before removing from DB so we don't leak routes.
+    let nano = crate::nano_client::NanoClient::from_config(&state.cfg);
+    if let Err(e) = nano.delete_app(&app.hostname).await {
+        if !crate::nano_client::is_not_found(&e) {
+            tracing::warn!("nano-rs deregister failed for {}: {e}", app.hostname);
+        }
+    }
+
+    // Remove custom domain TLS if one was set.
+    if let Some(ref domain) = app.custom_domain {
+        if let Err(e) = state.proxy.remove_cert(domain) {
+            tracing::warn!("proxy remove_cert({domain}) failed: {e}");
+        }
+    }
+
     db::app_delete(&state.pool, &name).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -223,6 +239,7 @@ async fn deployments_list(
         .into_iter()
         .map(|d| serde_json::json!({
             "id": d.id,
+            "sha": d.sha,
             "status": d.status,
             "deployer": d.deployer,
             "created_at": d.created_at.to_rfc3339(),
@@ -251,8 +268,8 @@ async fn apps_rollback(
             let current = app.current_sha.as_deref().unwrap_or("");
             deploys
                 .iter()
-                .find(|d| d.status == "active" && d.id != current)
-                .map(|d| d.id.clone())
+                .find(|d| d.status == "success" && d.sha.as_deref() != Some(current))
+                .and_then(|d| d.sha.clone())
                 .ok_or_else(|| ApiError::Bad("no previous deploy to roll back to".into()))?
         }
     };
@@ -389,7 +406,23 @@ async fn domain_set(
     validate_domain(&body.domain)?;
     let app = db::app_get(&state.pool, &name).await?.ok_or(ApiError::NotFound)?;
     check_ownership(&auth, &app.owner)?;
+
+    // Remove old custom domain cert before setting the new one.
+    if let Some(ref old) = app.custom_domain {
+        if old != &body.domain {
+            if let Err(e) = state.proxy.remove_cert(old) {
+                tracing::warn!("proxy remove_cert({old}) failed: {e}");
+            }
+        }
+    }
+
     db::app_set_custom_domain(&state.pool, &name, Some(&body.domain)).await?;
+
+    // Provision TLS for the custom domain. Failures are non-fatal (logged as warn).
+    if let Err(e) = state.proxy.provision_cert(&body.domain) {
+        tracing::warn!("proxy provision_cert({}) failed: {e}", body.domain);
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -401,27 +434,54 @@ async fn domain_unset(
     validate_app_name(&name)?;
     let app = db::app_get(&state.pool, &name).await?.ok_or(ApiError::NotFound)?;
     check_ownership(&auth, &app.owner)?;
+
+    if let Some(ref domain) = app.custom_domain {
+        if let Err(e) = state.proxy.remove_cert(domain) {
+            tracing::warn!("proxy remove_cert({domain}) failed: {e}");
+        }
+    }
+
     db::app_set_custom_domain(&state.pool, &name, None).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 // ── Logs ──────────────────────────────────────────────────────────────────────
 
+#[derive(Deserialize)]
+struct LogsQuery {
+    #[serde(default = "default_lines")]
+    lines: usize,
+}
+fn default_lines() -> usize { 100 }
+
 async fn logs_get(
     State(state): State<Arc<AppState>>,
     Extension(auth): Extension<AuthUser>,
     Path(name): Path<String>,
+    Query(q): Query<LogsQuery>,
 ) -> ApiResult<String> {
     validate_app_name(&name)?;
     let app = db::app_get(&state.pool, &name).await?.ok_or(ApiError::NotFound)?;
     check_ownership(&auth, &app.owner)?;
     let deploys = db::deployments_for_app(&state.pool, &name).await?;
-    let log = deploys
+    if deploys.is_empty() {
+        return Ok(format!("no deployments found for {name}\n"));
+    }
+    let lines: Vec<String> = deploys
         .iter()
-        .filter_map(|d| d.log_output.as_deref())
-        .collect::<Vec<_>>()
-        .join("\n---\n");
-    Ok(log)
+        .take(q.lines)
+        .map(|d| {
+            let sha = d.sha.as_deref().unwrap_or("-");
+            let ts = d.created_at.format("%Y-%m-%dT%H:%M:%SZ");
+            let mut line = format!("{ts}  sha={}  deployer={}  status={}", sha, d.deployer, d.status);
+            if let Some(ref log) = d.log_output {
+                line.push('\n');
+                line.push_str(log);
+            }
+            line
+        })
+        .collect();
+    Ok(lines.join("\n---\n") + "\n")
 }
 
 // ── User handlers (admin only) ────────────────────────────────────────────────

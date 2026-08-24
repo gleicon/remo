@@ -10,6 +10,12 @@ pub async fn open(path: &str) -> Result<SqlitePool> {
 }
 
 async fn migrate(pool: &SqlitePool) -> Result<()> {
+    // Safe on existing DBs — SQLite returns an error if the column already exists,
+    // which we ignore. This covers databases created before the sha column was added.
+    let _ = sqlx::query("ALTER TABLE deployments ADD COLUMN sha TEXT")
+        .execute(pool)
+        .await;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS apps (
@@ -44,6 +50,7 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
             id          TEXT PRIMARY KEY,
             app_id      TEXT NOT NULL REFERENCES apps(id),
             deployer    TEXT NOT NULL,
+            sha         TEXT,
             status      TEXT NOT NULL DEFAULT 'pending',
             log_output  TEXT,
             created_at  TEXT NOT NULL
@@ -264,6 +271,7 @@ pub struct Deployment {
     pub id: String,
     pub app_id: String,
     pub deployer: String,
+    pub sha: Option<String>,
     pub status: String,
     pub log_output: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -271,12 +279,13 @@ pub struct Deployment {
 
 pub async fn deployment_create(pool: &SqlitePool, d: &Deployment) -> Result<()> {
     sqlx::query(
-        "INSERT INTO deployments (id,app_id,deployer,status,log_output,created_at)
-         VALUES (?,?,?,?,?,?)",
+        "INSERT INTO deployments (id,app_id,deployer,sha,status,log_output,created_at)
+         VALUES (?,?,?,?,?,?,?)",
     )
     .bind(&d.id)
     .bind(&d.app_id)
     .bind(&d.deployer)
+    .bind(&d.sha)
     .bind(&d.status)
     .bind(&d.log_output)
     .bind(d.created_at.to_rfc3339())
@@ -289,10 +298,12 @@ pub async fn deployment_update_status(
     pool: &SqlitePool,
     id: &str,
     status: &str,
+    sha: Option<&str>,
     log: Option<&str>,
 ) -> Result<()> {
-    sqlx::query("UPDATE deployments SET status=?, log_output=? WHERE id=?")
+    sqlx::query("UPDATE deployments SET status=?, sha=?, log_output=? WHERE id=?")
         .bind(status)
+        .bind(sha)
         .bind(log)
         .bind(id)
         .execute(pool)
@@ -315,6 +326,7 @@ fn row_to_deployment(row: sqlx::sqlite::SqliteRow) -> Deployment {
         id: row.get("id"),
         app_id: row.get("app_id"),
         deployer: row.get("deployer"),
+        sha: row.get("sha"),
         status: row.get("status"),
         log_output: row.get("log_output"),
         created_at: row

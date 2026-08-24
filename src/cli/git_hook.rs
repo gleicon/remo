@@ -100,10 +100,33 @@ async fn run_deploy(app_name: String, sha: String, deployer: String) -> Result<(
         nano_client,
     };
 
-    let deployed_sha = crate::deploy::run(&ctx, tar.stdout).await?;
-    crate::db::app_set_sha(&pool, &app_name, &deployed_sha).await?;
+    let deploy_id = uuid::Uuid::new_v4().to_string();
+    crate::db::deployment_create(&pool, &crate::db::Deployment {
+        id: deploy_id.clone(),
+        app_id: app_name.clone(),
+        deployer: deployer.clone(),
+        sha: None,
+        status: "pending".into(),
+        log_output: None,
+        created_at: chrono::Utc::now(),
+    }).await?;
 
-    println!("Deployed {app_name} @ {deployed_sha}");
+    match crate::deploy::run(&ctx, tar.stdout).await {
+        Ok(deployed_sha) => {
+            crate::db::app_set_sha(&pool, &app_name, &deployed_sha).await?;
+            crate::db::deployment_update_status(
+                &pool, &deploy_id, "success", Some(&deployed_sha), None,
+            ).await?;
+            println!("Deployed {app_name} @ {deployed_sha}");
+        }
+        Err(e) => {
+            crate::db::deployment_update_status(
+                &pool, &deploy_id, "failed", None, Some(&e.to_string()),
+            ).await?;
+            return Err(e);
+        }
+    }
+
     Ok(())
 }
 
