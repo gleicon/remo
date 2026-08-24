@@ -26,13 +26,14 @@ install: build
 	cp target/release/remo /usr/local/bin/remo
 	@remo --version
 
-# Bump version in Cargo.toml, commit, tag, push — triggers CI (linux/amd64 release binary).
+# Bump version in Cargo.toml and Dockerfile, commit, tag, push — triggers CI (linux/amd64 release binary).
 # Usage: make release VERSION=v0.4.0
 release:
 	@test -n "$(VERSION)" || (echo "Usage: make release VERSION=v0.4.0"; exit 1)
 	@BARE=$$(echo "$(VERSION)" | sed 's/^v//'); \
 	  perl -i -pe 's/^version = .*/version = "'"$$BARE"'"/' Cargo.toml
-	git add Cargo.toml
+	perl -i -pe 's/^ARG REMO_VERSION=.*/ARG REMO_VERSION=$(VERSION)/' Dockerfile
+	git add Cargo.toml Dockerfile
 	git commit -m "chore: bump version to $(VERSION)"
 	git tag $(VERSION)
 	git push origin main

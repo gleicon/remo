@@ -1,6 +1,6 @@
 FROM debian:bookworm-slim
 
-ARG REMO_VERSION=v0.4.8
+ARG REMO_VERSION=v0.5.0
 ARG TARGETARCH=amd64
 
 RUN apt-get update && apt-get install -y \
