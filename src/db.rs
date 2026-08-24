@@ -10,9 +10,11 @@ pub async fn open(path: &str) -> Result<SqlitePool> {
 }
 
 async fn migrate(pool: &SqlitePool) -> Result<()> {
-    // Safe on existing DBs — SQLite returns an error if the column already exists,
-    // which we ignore. This covers databases created before the sha column was added.
+    // Safe on existing DBs: ignore errors (column already exists, table already dropped).
     let _ = sqlx::query("ALTER TABLE deployments ADD COLUMN sha TEXT")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("DROP TABLE IF EXISTS nodes")
         .execute(pool)
         .await;
 
@@ -36,13 +38,6 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
             token_hash  TEXT NOT NULL,
             ssh_pubkey  TEXT,
             is_admin    INTEGER NOT NULL DEFAULT 0,
-            created_at  TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS nodes (
-            id          TEXT PRIMARY KEY,
-            address     TEXT NOT NULL,
-            status      TEXT NOT NULL DEFAULT 'active',
             created_at  TEXT NOT NULL
         );
 

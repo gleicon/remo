@@ -4,11 +4,7 @@
 
 **State:** remo v0.4.9, standalone repo at gleicon/remo. Control plane live on VPS. nano-rs v2.7.0 (binary-download Dockerfile, ~5s build). Template system: `--template NAME` with user dir `~/.remo/templates/<name>/`. Deploy durability: `reload_nano` failure is non-fatal; sync loop re-registers on recovery.
 
-**Open gaps (Phase 6):**
-- `ProxyBackend` trait in `src/proxy/` — fully implemented but never called from deploy or API. Needed for custom domain TLS.
-- `deployment_create` never called — `remo logs myapp` always returns empty.
-- `remo server install` CLI scaffolded, not implemented.
-- `remo logs --follow` removed (was silent no-op); streaming logs not yet built.
+**State:** All phases complete. No unwired code. No silent stubs. See "Future features" section below for decided vs. undecided work.
 
 ---
 
@@ -51,13 +47,26 @@
 - [x] Push remo as standalone repo: github.com/gleicon/remo
 - [x] SETUP_GUIDE.md updated with correct repo URL
 
-### Phase 6 — Production gaps (post-split)
+### Phase 6 — Production gaps (complete)
 - [x] `remo server install` implementation
 - [x] Proxy wired for custom domain TLS (NoopProxy in Docker mode; NginxBackend on bare VPS)
 - [x] app_delete deregisters from nano-rs + cleans up custom domain cert
 - [x] Deployment rows written on git-push (pending → success/failed + sha)
 - [x] `remo logs` and `remo deployments` return real data with sha and timestamps
 - [x] Rollback fixed to compare deployment sha (not UUID) against current_sha
-- [ ] `nano.json` in app root (entrypoint/type override) — deferred
-- [ ] `remo logs --follow` (streaming) — deferred; current logs show deployment history
-- [ ] Systemd unit generation — not needed for Docker-based VPS
+- [x] `remo drain myapp` wired (`POST /api/apps/:name/drain` → nano-rs graceful drain)
+- [x] Dead code removed: agent.rs, nodes table, CaddyBackend.domain field
+
+---
+
+## Future features (discuss before implementing)
+
+These are real ideas, not deferred work. Nothing is half-built waiting for them.
+
+| Feature | What it needs | Notes |
+|---------|--------------|-------|
+| **Log streaming** (`remo logs --follow`) | nano-rs to expose SSE or WebSocket log endpoint per app | nano-rs v2.7.0 has no streaming log API; needs design in nano-rs first |
+| **`nano.json` override at push time** | git hook reads `nano.json` from archive before calling deploy | Changes entrypoint/app_type per-push without re-creating the app; low priority |
+| **Multi-node / horizontal scale** | Control plane distributes deploys to worker nodes; agent receives them | Big design — node discovery, artifact transfer, consensus on current sha |
+| **Systemd unit generation** | `remo server install` writes a systemd unit for bare-VPS mode | Moot for Docker deployments; only matters if someone runs remo without Docker |
+| **Custom domain TLS in Docker mode** | Host-side certbot called from within the container, or a side-channel mechanism | Currently logs a warning; user runs certbot manually |

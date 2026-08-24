@@ -80,11 +80,12 @@ On `apps_delete` and `domain_unset`, `remove_cert` is called non-fatally.
 
 Every `git push` writes a deployment row to the `deployments` table: `pending` → `success`/`failed` with the content-addressed sha. `remo logs myapp` and `remo deployments myapp` show this history. `remo rollback myapp` uses deployment sha to swap the `current/` symlink.
 
-## Known gaps
+## Future features (undecided — see PLAN.md for details)
 
-- `nano.json` in the app root (entrypoint/type override at push time) — not yet parsed
-- Log streaming (`remo logs --follow`) — not implemented; `remo logs` shows deployment history, not runtime output
-- Systemd unit generation — Docker-only setup doesn't need it
+- Log streaming (`remo logs --follow`) — needs nano-rs streaming log API
+- `nano.json` override at push time — entrypoint/app_type from repo, not DB
+- Multi-node horizontal scale — requires agent design
+- Custom domain TLS in Docker mode — manual certbot for now
 
 ## Dev workflow
 

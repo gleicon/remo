@@ -52,6 +52,28 @@ pub async fn deployments(args: DeploymentsArgs) -> Result<()> {
     Ok(())
 }
 
+// ── Drain ─────────────────────────────────────────────────────────────────────
+
+#[derive(clap::Args)]
+pub struct DrainArgs {
+    /// App name
+    pub app: String,
+}
+
+pub async fn drain(args: DrainArgs) -> Result<()> {
+    let cfg = ClientConfig::load()?;
+    let client = api_client(&cfg);
+    let res = client
+        .post(format!("{}/api/apps/{}/drain", cfg.server_url, args.app))
+        .send()
+        .await?;
+    if !res.status().is_success() {
+        anyhow::bail!("{}", res.text().await?);
+    }
+    println!("{} drained — no new requests will be routed until next push", args.app);
+    Ok(())
+}
+
 // ── Rollback ──────────────────────────────────────────────────────────────────
 
 #[derive(clap::Args)]

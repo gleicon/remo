@@ -44,6 +44,8 @@ enum Commands {
     },
     /// Scale app workers
     Scale(cli::deploy::ScaleArgs),
+    /// Drain app — stop routing new requests (graceful shutdown before redeploy)
+    Drain(cli::deploy::DrainArgs),
     /// Deployment history for an app
     Deployments(cli::deploy::DeploymentsArgs),
     /// Roll back to previous deploy
@@ -55,9 +57,6 @@ enum Commands {
     /// git-hook — called by SSH forced command (internal)
     #[command(hide = true)]
     GitHook(cli::git_hook::GitHookArgs),
-    /// Data-plane agent for worker nodes (future multi-node)
-    #[command(hide = true)]
-    Agent(cli::agent::AgentArgs),
 }
 
 #[tokio::main]
@@ -79,11 +78,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::Users { cmd } => cli::users::run(cmd).await,
         Commands::Env { cmd } => cli::env::run(cmd).await,
         Commands::Scale(args) => cli::deploy::scale(args).await,
+        Commands::Drain(args) => cli::deploy::drain(args).await,
         Commands::Deployments(args) => cli::deploy::deployments(args).await,
         Commands::Rollback(args) => cli::deploy::rollback(args).await,
         Commands::Logs(args) => cli::logs::run(args).await,
         Commands::Push => cli::push::run().await,
         Commands::GitHook(args) => cli::git_hook::run(args).await,
-        Commands::Agent(args) => cli::agent::run(args).await,
     }
 }

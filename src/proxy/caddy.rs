@@ -6,14 +6,11 @@ use super::ProxyBackend;
 /// Caddy backend. On-demand TLS means no per-app action is needed — Caddy
 /// fetches a cert on first HTTPS hit for any subdomain covered by the wildcard
 /// A record. The only config needed is written once by `remo server install`.
-pub struct CaddyBackend {
-    #[allow(dead_code)]
-    domain: String,
-}
+pub struct CaddyBackend;
 
 impl CaddyBackend {
-    pub fn new(domain: String) -> Self {
-        Self { domain }
+    pub fn new(_domain: String) -> Self {
+        Self
     }
 
     /// Returns the static Caddyfile snippet written by `remo server install`.
