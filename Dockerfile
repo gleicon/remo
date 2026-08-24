@@ -1,24 +1,18 @@
-FROM rust:1.88-slim AS builder
-
-RUN apt-get update && apt-get install -y \
-        pkg-config \
-        libssl-dev \
-        ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /build
-COPY . .
-RUN cargo build --release
-
-# ── Runtime image ──────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 
+ARG REMO_VERSION=v0.4.8
+ARG TARGETARCH=amd64
+
 RUN apt-get update && apt-get install -y \
         ca-certificates \
+        wget \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/remo /usr/local/bin/remo
+RUN wget -qO /usr/local/bin/remo \
+      "https://github.com/gleicon/remo/releases/download/${REMO_VERSION}/remo-linux-${TARGETARCH}" && \
+    chmod +x /usr/local/bin/remo && \
+    remo --version
 
 # git system user for SSH forced-command deploys (UID 2000 — consistent across containers).
 # password field set to '*' (disabled, not locked) so OpenSSH's allowed_user() check

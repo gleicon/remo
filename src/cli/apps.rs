@@ -20,27 +20,26 @@ pub struct CreateArgs {
     /// App name (becomes <name>.<domain>)
     pub name: String,
 
-    /// Scaffold an HTML-serving JS worker instead of the default API starter
-    #[arg(long, conflicts_with_all = ["wasm", "kv", "spa"])]
+    /// Template to scaffold: js (default), html, wasm, kv, spa, gas,
+    /// or a name from ~/.remo/templates/<name>/ for your own starters
+    #[arg(long, short = 't', value_name = "NAME")]
+    pub template: Option<String>,
+
+    // Legacy per-template flags — kept for backwards compatibility, not shown in --help.
+    #[arg(long, conflicts_with = "template", hide = true)]
     pub html: bool,
-
-    /// Scaffold a WebAssembly starter (JS wrapper + inline wasm module)
-    #[arg(long, conflicts_with_all = ["html", "kv", "spa"])]
+    #[arg(long, conflicts_with = "template", hide = true)]
     pub wasm: bool,
-
-    /// Scaffold a persistent key-value counter app using nano:kv
-    #[arg(long, conflicts_with_all = ["html", "wasm", "spa"])]
+    #[arg(long, conflicts_with = "template", hide = true)]
     pub kv: bool,
-
-    /// Scaffold a browser-compatible SPA shell with localStorage (backed by nano:kv)
-    #[arg(long, conflicts_with_all = ["html", "wasm", "kv"])]
+    #[arg(long, conflicts_with = "template", hide = true)]
     pub spa: bool,
 
-    /// App type: js | wasm | static (overridden by --html/--wasm)
+    /// App type: js | wasm | static
     #[arg(long = "type", default_value = "js")]
     pub app_type: String,
 
-    /// Entry point (overridden by --html/--wasm)
+    /// Entry point file
     #[arg(long, default_value = "index.js")]
     pub entrypoint: String,
 }
@@ -57,21 +56,88 @@ pub async fn run(cmd: AppsCmd) -> Result<()> {
     }
 }
 
-enum Template { Js, Html, Wasm, Kv, Spa }
+// ── Template resolution ───────────────────────────────────────────────────────
+
+/// Files to write into the new app directory: (relative_path, content).
+type TemplateFiles = Vec<(String, String)>;
+
+/// Resolve template name → list of files to write, app_type, entrypoint.
+fn resolve_template(tpl: &str, app_name: &str) -> Result<(TemplateFiles, String, String)> {
+    // User templates override built-ins: ~/.remo/templates/<name>/  or  ~/.remo/templates/<name>.js
+    if let Some(files) = load_user_template(tpl, app_name)? {
+        let entry = files.iter().find(|(p, _)| p == "index.js")
+            .map(|(p, _)| p.clone())
+            .unwrap_or_else(|| files.first().map(|(p, _)| p.clone()).unwrap_or_else(|| "index.js".into()));
+        return Ok((files, "js".into(), entry));
+    }
+
+    let files: TemplateFiles = match tpl {
+        "html" => vec![("index.js".into(), starter_html(app_name))],
+        "wasm" => vec![("index.js".into(), starter_wasm())],
+        "kv"   => vec![("index.js".into(), starter_kv(app_name))],
+        "spa"  => vec![("index.js".into(), starter_spa(app_name))],
+        "gas"  => vec![("index.gs".into(), starter_gas(app_name))],
+        _      => vec![("index.js".into(), starter_js(app_name))],
+    };
+    let entry = if tpl == "gas" { "index.gs" } else { "index.js" };
+    Ok((files, "js".into(), entry.into()))
+}
+
+/// Load a user-defined template from ~/.remo/templates/<name>/ or ~/.remo/templates/<name>.js.
+/// Returns None if no such template exists, Err on I/O failure.
+fn load_user_template(name: &str, app_name: &str) -> Result<Option<TemplateFiles>> {
+    let Some(home) = dirs::home_dir() else { return Ok(None) };
+    let base = home.join(".remo/templates");
+
+    // Directory template: ~/.remo/templates/<name>/
+    let dir = base.join(name);
+    if dir.is_dir() {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                let rel = path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                if rel.is_empty() { continue; }
+                let content = std::fs::read_to_string(&path)?;
+                // Replace {{name}} placeholder with the actual app name.
+                files.push((rel, content.replace("{{name}}", app_name)));
+            }
+        }
+        if !files.is_empty() {
+            return Ok(Some(files));
+        }
+    }
+
+    // Single-file template: ~/.remo/templates/<name>.js
+    let single = base.join(format!("{name}.js"));
+    if single.is_file() {
+        let content = std::fs::read_to_string(&single)?;
+        return Ok(Some(vec![("index.js".into(), content.replace("{{name}}", app_name))]));
+    }
+
+    Ok(None)
+}
+
+// ── Create command ────────────────────────────────────────────────────────────
 
 async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
     let cfg = ClientConfig::load()?;
     let base = &cfg.server_url;
 
-    let template = if args.wasm { Template::Wasm }
-        else if args.html { Template::Html }
-        else if args.kv   { Template::Kv }
-        else if args.spa  { Template::Spa }
-        else              { Template::Js };
-    let (app_type, entrypoint) = match &template {
-        Template::Js => (args.app_type.clone(), args.entrypoint.clone()),
-        _            => ("js".to_string(), "index.js".to_string()),
-    };
+    // Resolve template name from --template or legacy flags.
+    let tpl_name = if let Some(ref t) = args.template {
+        t.as_str().to_owned()
+    } else if args.html { "html".into() }
+      else if args.wasm { "wasm".into() }
+      else if args.kv   { "kv".into() }
+      else if args.spa  { "spa".into() }
+      else              { "js".into() };
+
+    let (files, app_type, entrypoint) = resolve_template(&tpl_name, &args.name)?;
 
     let res = client
         .post(format!("{base}/api/apps"))
@@ -125,14 +191,6 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
     } else {
         std::fs::create_dir_all(&args.name)?;
 
-        let files: Vec<(&str, String)> = match &template {
-            Template::Html => vec![("index.js", starter_html(&args.name))],
-            Template::Wasm => vec![("index.js", starter_wasm(&args.name))],
-            Template::Kv   => vec![("index.js", starter_kv(&args.name))],
-            Template::Spa  => vec![("index.js", starter_spa(&args.name))],
-            Template::Js   => vec![(&entrypoint, starter_js(&args.name))],
-        };
-
         for (filename, content) in &files {
             let path = format!("{}/{filename}", args.name);
             if !std::path::Path::new(&path).exists() {
@@ -162,6 +220,8 @@ async fn create(client: reqwest::Client, args: CreateArgs) -> Result<()> {
 
     Ok(())
 }
+
+// ── Built-in template starters ────────────────────────────────────────────────
 
 fn starter_js(name: &str) -> String {
     format!(
@@ -228,6 +288,10 @@ export default {{
       return new Response(JSON.stringify({{ hits: 0 }}), {{
         headers: {{ 'content-type': 'application/json' }},
       }});
+    }}
+
+    if (url.pathname !== '/') {{
+      return new Response('Not Found', {{ status: 404 }});
     }}
 
     const raw = await kv.get('hits');
@@ -326,7 +390,7 @@ export default {{
     )
 }
 
-fn starter_wasm(_name: &str) -> String {
+fn starter_wasm() -> String {
     // Minimal wasm module: exports add(i32, i32) -> i32
     // Compile your own with wasm-pack or replace WASM_B64 with your module.
     r#"// Inline wasm module: exports add(a, b) -> a + b
@@ -365,6 +429,29 @@ export default {
 "#.to_string()
 }
 
+fn starter_gas(name: &str) -> String {
+    format!(
+        r#"// Google Apps Script-compatible handler — runs unchanged on nano-rs via nano:gas.
+// Set GAS_COMPAT=true in remo env vars to auto-wrap this file.
+// Docs: https://github.com/gleicon/nano-rs
+
+function doGet(e) {{
+  return ContentService
+    .createTextOutput(JSON.stringify({{ app: '{name}', path: e.pathInfo || '/', params: e.parameters }}))
+    .setMimeType(ContentService.MimeType.JSON);
+}}
+
+function doPost(e) {{
+  const body = e.postData ? JSON.parse(e.postData.contents) : {{}};
+  return ContentService
+    .createTextOutput(JSON.stringify({{ app: '{name}', received: body }}))
+    .setMimeType(ContentService.MimeType.JSON);
+}}
+"#
+    )
+}
+
+// ── Other subcommands ─────────────────────────────────────────────────────────
 
 async fn list(client: reqwest::Client) -> Result<()> {
     let base = ClientConfig::load()?.server_url;

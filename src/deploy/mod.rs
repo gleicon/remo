@@ -46,7 +46,11 @@ pub async fn run(ctx: &DeployContext, tar_bytes: Vec<u8>) -> Result<String> {
 
     // Reload before pruning: prune may delete the active deploy dir if the same
     // content-addressed SHA was deployed previously (its mtime is older).
-    reload_nano(ctx, &entrypoint_path).await?;
+    // Registration failure is non-fatal: the file deploy (extract + symlink) is durable;
+    // nano-rs is ephemeral. The sync loop re-registers on next nano-rs recovery.
+    if let Err(e) = reload_nano(ctx, &entrypoint_path).await {
+        tracing::warn!("nano-rs registration failed (sync loop will recover): {e}");
+    }
     prune_old_deploys(&ctx.app_name, &ctx.data_dir).await?;
 
     Ok(sha)

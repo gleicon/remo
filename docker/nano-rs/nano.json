@@ -9,6 +9,9 @@
   ],
   "server": {
     "port": 8080,
-    "host": "0.0.0.0"
+    "host": "0.0.0.0",
+    "queue_depth_per_worker": 32,
+    "handler_cache_refresh_ms": 500,
+    "dns_rebinding_protection": true
   }
 }

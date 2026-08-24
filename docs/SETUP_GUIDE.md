@@ -97,20 +97,22 @@ systemctl reload ssh
 
 ### 1e. Install the remo binary on the host
 
-The git-hook runs as a host process (not inside Docker). The binary is built from source inside the Docker image and then copied out:
+The git-hook runs as a host process (not inside Docker). Download the pre-built binary from GitHub releases:
+
+```bash
+REMO_VERSION=v0.4.8
+wget -qO /usr/local/bin/remo \
+  "https://github.com/gleicon/remo/releases/download/${REMO_VERSION}/remo-linux-amd64"
+chmod +x /usr/local/bin/remo
+remo --version
+```
+
+Alternatively, copy it out of the running Docker container (same binary):
 
 ```bash
 # After the Docker stack is running (step 2 below):
 docker compose cp remo:/usr/local/bin/remo /usr/local/bin/remo
 remo --version
-```
-
-Alternatively, if you have Rust on the host:
-
-```bash
-git clone https://github.com/gleicon/remo /home/ubuntu/remo
-cd /home/ubuntu/remo && cargo build --release
-cp target/release/remo /usr/local/bin/remo
 ```
 
 ### 1f. Clone remo and run the installer
@@ -201,12 +203,13 @@ certbot --nginx -d yourdomain.tld -d "*.yourdomain.tld"
 
 ## 4. Laptop — first login (admin)
 
-Build the remo CLI (or download the same release binary):
+Download the remo CLI binary (or build from source with `cargo build --release`):
 
 ```bash
-git clone https://github.com/gleicon/remo
-cd remo && cargo build --release
-sudo cp target/release/remo /usr/local/bin/remo
+REMO_VERSION=v0.4.8
+wget -qO /usr/local/bin/remo \
+  "https://github.com/gleicon/remo/releases/download/${REMO_VERSION}/remo-linux-amd64"
+chmod +x /usr/local/bin/remo
 ```
 
 Run interactive setup:
@@ -250,10 +253,26 @@ Live at `https://alice-myapp.yourdomain.tld`.
 | Flag | Starter | Use for |
 |------|---------|---------|
 | _(none)_ | ES module fetch handler | JSON APIs, routing logic |
-| `--html` | JS worker returning styled HTML | Static pages, landing pages |
-| `--wasm` | JS worker wrapping a wasm module | Compute-heavy logic, Rust/C output |
-| `--kv` | Persistent counter via `nano:kv` | Apps that need state across requests |
-| `--spa` | HTML shell + localStorage shim | Browser-compatible SPAs |
+| `--template html` | JS worker returning styled HTML | Static pages, landing pages |
+| `--template wasm` | JS worker wrapping a wasm module | Compute-heavy logic, Rust/C output |
+| `--template kv` | Persistent counter via `nano:kv` | Apps that need state across requests |
+| `--template spa` | HTML shell + localStorage shim | Browser-compatible SPAs |
+| `--template gas` | Google Apps Script `.gs` handler | Migrate GAS scripts to edge |
+
+The old per-flag forms (`--html`, `--kv`, etc.) still work but are not shown in `--help`.
+
+**Custom templates** — save any starter to `~/.remo/templates/<name>/` and use it anywhere:
+
+```bash
+# Create a custom template
+mkdir -p ~/.remo/templates/webhook
+echo 'export default { async fetch(r) { ... } }' > ~/.remo/templates/webhook/index.js
+
+# Use it
+remo apps create mywebhook --template webhook
+```
+
+`{{name}}` in any template file is replaced with the actual app name.
 
 Default JS template:
 
