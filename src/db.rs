@@ -66,6 +66,13 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
             expires_at  TEXT NOT NULL,
             used_at     TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS waitlist (
+            id         TEXT PRIMARY KEY,
+            email      TEXT NOT NULL UNIQUE,
+            status     TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL
+        );
         "#,
     )
     .execute(pool)
@@ -446,5 +453,62 @@ fn row_to_invite(row: sqlx::sqlite::SqliteRow) -> Invite {
         expires_at: row.get::<String, _>("expires_at").parse().unwrap_or(Utc::now()),
         used_at: row.get::<Option<String>, _>("used_at")
             .and_then(|s| s.parse().ok()),
+    }
+}
+
+// ── Waitlist ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaitlistEntry {
+    pub id: String,
+    pub email: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+pub async fn waitlist_submit(pool: &SqlitePool, email: &str) -> Result<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO waitlist (id,email,status,created_at) VALUES (?,?,'pending',?)
+         ON CONFLICT(email) DO NOTHING",
+    )
+    .bind(&id)
+    .bind(email)
+    .bind(Utc::now().to_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(id)
+}
+
+pub async fn waitlist_list(pool: &SqlitePool) -> Result<Vec<WaitlistEntry>> {
+    let rows = sqlx::query("SELECT * FROM waitlist ORDER BY created_at DESC")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(row_to_waitlist).collect())
+}
+
+pub async fn waitlist_get(pool: &SqlitePool, id: &str) -> Result<Option<WaitlistEntry>> {
+    let row = sqlx::query("SELECT * FROM waitlist WHERE id=?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(row_to_waitlist))
+}
+
+pub async fn waitlist_set_status(pool: &SqlitePool, id: &str, status: &str) -> Result<()> {
+    sqlx::query("UPDATE waitlist SET status=? WHERE id=?")
+        .bind(status)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+fn row_to_waitlist(row: sqlx::sqlite::SqliteRow) -> WaitlistEntry {
+    WaitlistEntry {
+        id: row.get("id"),
+        email: row.get("email"),
+        status: row.get("status"),
+        created_at: row.get::<String, _>("created_at").parse().unwrap_or(Utc::now()),
     }
 }

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::db::{self, App, Invite, User};
+use crate::db::{self, App, Invite, User, WaitlistEntry};
 use crate::server::auth::AuthUser;
 use crate::server::AppState;
 
@@ -66,6 +66,7 @@ fn safe_join(
 pub fn public_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/health", get(health))
+        .route("/waitlist", post(waitlist_submit))
         .route("/api/invites/{token}/claim", post(invite_claim))
 }
 
@@ -97,6 +98,9 @@ pub fn admin_routes() -> Router<Arc<AppState>> {
         .route("/api/users", get(users_list).post(users_create))
         .route("/api/users/{name}", delete(users_delete))
         .route("/api/admin/invites", post(invite_create).get(invites_list))
+        .route("/api/admin/waitlist", get(waitlist_list))
+        .route("/api/admin/waitlist/{id}/approve", post(waitlist_approve))
+        .route("/api/admin/waitlist/{id}", delete(waitlist_reject))
 }
 
 // ── App handlers ──────────────────────────────────────────────────────────────
@@ -711,6 +715,111 @@ async fn users_delete(
             tracing::warn!("user {name} deleted but authorized_keys removal failed: {e}");
         }
     }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Waitlist handlers ─────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct WaitlistSubmitBody {
+    email: String,
+}
+
+async fn waitlist_submit(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<WaitlistSubmitBody>,
+) -> ApiResult<StatusCode> {
+    let email = body.email.trim().to_lowercase();
+    if email.is_empty() || !email.contains('@') || email.len() > 254 {
+        return Err(ApiError::Bad("invalid email address".into()));
+    }
+    db::waitlist_submit(&state.pool, &email).await?;
+    Ok(StatusCode::CREATED)
+}
+
+async fn waitlist_list(
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Json<Vec<serde_json::Value>>> {
+    let entries = db::waitlist_list(&state.pool).await?;
+    let out = entries
+        .into_iter()
+        .map(|e: WaitlistEntry| serde_json::json!({
+            "id": e.id,
+            "email": e.email,
+            "status": e.status,
+            "created_at": e.created_at.to_rfc3339(),
+        }))
+        .collect();
+    Ok(Json(out))
+}
+
+#[derive(Deserialize)]
+struct WaitlistApproveBody {
+    /// Username to create. Derived from email prefix if omitted.
+    username: Option<String>,
+}
+
+async fn waitlist_approve(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<WaitlistApproveBody>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let entry = db::waitlist_get(&state.pool, &id).await?.ok_or(ApiError::NotFound)?;
+    if entry.status != "pending" {
+        return Err(ApiError::Conflict(format!("entry is already '{}'", entry.status)));
+    }
+
+    // Derive username from email prefix if not given: strip @domain, lowercase,
+    // replace non-alphanum with '-', truncate to 32 chars.
+    let username = body.username.unwrap_or_else(|| {
+        let prefix = entry.email.split('@').next().unwrap_or("user");
+        let slug: String = prefix.chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+            .collect();
+        slug.trim_matches('-').chars().take(32).collect()
+    });
+
+    if !crate::validation::is_valid_app_name(&username) {
+        return Err(ApiError::Bad(format!(
+            "derived username '{}' is invalid — pass an explicit username in the request body",
+            username
+        )));
+    }
+    if db::user_get_by_name(&state.pool, &username).await?.is_some() {
+        return Err(ApiError::Conflict(format!("username '{}' already taken", username)));
+    }
+
+    let raw_token = gen_token();
+    let user = User {
+        id: Uuid::new_v4().to_string(),
+        name: username.clone(),
+        token_hash: crate::server::auth::sha256_hex(&raw_token),
+        ssh_pubkey: None,
+        is_admin: false,
+        created_at: Utc::now(),
+    };
+    db::user_create(&state.pool, &user).await?;
+    db::waitlist_set_status(&state.pool, &id, "approved").await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "username": username,
+            "email": entry.email,
+            "token": raw_token,
+        })),
+    ))
+}
+
+async fn waitlist_reject(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    let entry = db::waitlist_get(&state.pool, &id).await?.ok_or(ApiError::NotFound)?;
+    if entry.status != "pending" {
+        return Err(ApiError::Conflict(format!("entry is already '{}'", entry.status)));
+    }
+    db::waitlist_set_status(&state.pool, &id, "rejected").await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
