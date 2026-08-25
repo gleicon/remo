@@ -1,324 +1,645 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>remoapps — git push deploy, no Kubernetes</title>
+<title>remoapps — git push deploy for your VPS</title>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg: #0d1117;
-    --surface: #161b22;
-    --border: #30363d;
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --accent: #58a6ff;
-    --green: #3fb950;
-    --red: #f85149;
-  }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    line-height: 1.6;
-    padding: 0 1rem;
-  }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  header {
-    max-width: 720px;
-    margin: 4rem auto 2rem;
-  }
-  header h1 {
-    font-size: 2rem;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-  }
-  header h1 span { color: var(--accent); }
-  header p {
-    color: var(--muted);
-    margin-top: 0.5rem;
-    font-size: 1.1rem;
-  }
+:root[data-theme="dark"] {
+  --bg:        #0a0a0b;
+  --surface:   #111113;
+  --surface2:  #18181b;
+  --border:    #27272a;
+  --border2:   #3f3f46;
+  --text:      #fafafa;
+  --muted:     #71717a;
+  --muted2:    #a1a1aa;
+  --accent:    #6366f1;
+  --accent-fg: #ffffff;
+  --green:     #22c55e;
+  --dim:       #3f3f46;
+}
+:root[data-theme="light"] {
+  --bg:        #ffffff;
+  --surface:   #f4f4f5;
+  --surface2:  #e4e4e7;
+  --border:    #e4e4e7;
+  --border2:   #d4d4d8;
+  --text:      #09090b;
+  --muted:     #71717a;
+  --muted2:    #52525b;
+  --accent:    #4f46e5;
+  --accent-fg: #ffffff;
+  --green:     #16a34a;
+  --dim:       #d4d4d8;
+}
 
-  .badge {
-    display: inline-block;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.1rem 0.5rem;
-    font-size: 0.78rem;
-    color: var(--green);
-    font-family: "SFMono-Regular", Consolas, monospace;
-    margin-top: 0.75rem;
-  }
+html { scroll-behavior: smooth; }
 
-  main { max-width: 720px; margin: 0 auto; padding-bottom: 6rem; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
 
-  section { margin-top: 3rem; }
-  h2 {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 1rem;
-  }
+code, pre, kbd, .mono {
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", Consolas, monospace;
+}
 
-  pre {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 1rem 1.25rem;
-    overflow-x: auto;
-    font-family: "SFMono-Regular", Consolas, "Courier New", monospace;
-    font-size: 0.88rem;
-    line-height: 1.7;
-    color: var(--text);
-  }
-  pre .comment { color: var(--muted); }
-  pre .cmd { color: var(--accent); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
 
-  .steps { list-style: none; counter-reset: steps; }
-  .steps li {
-    counter-increment: steps;
-    padding: 0.75rem 0 0.75rem 2.5rem;
-    border-bottom: 1px solid var(--border);
-    position: relative;
-  }
-  .steps li:last-child { border-bottom: none; }
-  .steps li::before {
-    content: counter(steps);
-    position: absolute;
-    left: 0;
-    top: 0.75rem;
-    width: 1.5rem;
-    height: 1.5rem;
-    border-radius: 50%;
-    background: var(--border);
-    color: var(--muted);
-    font-size: 0.78rem;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .steps li strong { display: block; margin-bottom: 0.25rem; }
-  .steps li code {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 0.1em 0.4em;
-    font-size: 0.85em;
-    font-family: "SFMono-Regular", Consolas, monospace;
-  }
+/* ── Nav ─────────────────────────────────────── */
 
-  .features {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
-    margin-top: 1rem;
-  }
-  .feature {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 1rem;
-  }
-  .feature .icon { font-size: 1.25rem; margin-bottom: 0.5rem; }
-  .feature strong { display: block; font-size: 0.95rem; }
-  .feature span { color: var(--muted); font-size: 0.85rem; }
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.nav-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.logo {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.logo span { color: var(--accent); }
+.logo .tag {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.1em 0.45em;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.nav-right { display: flex; align-items: center; gap: 1.25rem; }
+.nav-link { color: var(--muted2); font-size: 0.875rem; }
+.nav-link:hover { color: var(--text); text-decoration: none; }
 
-  /* Waitlist */
-  .waitlist-box {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 2rem;
-    margin-top: 1rem;
-  }
-  .waitlist-box p {
-    color: var(--muted);
-    margin-bottom: 1.25rem;
-    font-size: 0.95rem;
-  }
-  .form-row {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-  .form-row input[type="email"] {
-    flex: 1;
-    min-width: 220px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    font-size: 0.95rem;
-    padding: 0.6rem 0.9rem;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-  .form-row input[type="email"]:focus { border-color: var(--accent); }
-  .form-row button {
-    background: var(--accent);
-    color: #0d1117;
-    border: none;
-    border-radius: 6px;
-    padding: 0.6rem 1.25rem;
-    font-size: 0.95rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.15s;
-  }
-  .form-row button:hover { opacity: 0.85; }
-  .form-row button:disabled { opacity: 0.5; cursor: default; }
-  #wl-msg {
-    margin-top: 0.75rem;
-    font-size: 0.9rem;
-    min-height: 1.2em;
-  }
-  #wl-msg.ok  { color: var(--green); }
-  #wl-msg.err { color: var(--red); }
+/* Theme toggle */
+#theme-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 34px;
+  height: 34px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted2);
+  transition: border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+#theme-btn:hover { border-color: var(--border2); color: var(--text); }
+#theme-btn svg { width: 16px; height: 16px; fill: currentColor; }
 
-  footer {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 2rem 0;
-    border-top: 1px solid var(--border);
-    color: var(--muted);
-    font-size: 0.85rem;
-    display: flex;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
+/* ── Hero ────────────────────────────────────── */
+
+.hero {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 6rem 1.5rem 4rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4rem;
+  align-items: center;
+}
+@media (max-width: 768px) {
+  .hero { grid-template-columns: 1fr; gap: 2.5rem; padding: 3rem 1.25rem 2rem; }
+}
+.hero-text h1 {
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+  color: var(--text);
+}
+.hero-text h1 em {
+  font-style: normal;
+  color: var(--accent);
+}
+.hero-text p {
+  margin-top: 1rem;
+  color: var(--muted2);
+  font-size: 1.05rem;
+  max-width: 440px;
+}
+.hero-cta {
+  margin-top: 2rem;
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: 7px;
+  padding: 0.6rem 1.2rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+.btn-primary:hover { opacity: 0.85; }
+.btn-primary:disabled { opacity: 0.45; cursor: default; }
+.btn-ghost {
+  background: transparent;
+  color: var(--muted2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.6rem 1.2rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: border-color 0.15s, color 0.15s;
+}
+.btn-ghost:hover { border-color: var(--border2); color: var(--text); text-decoration: none; }
+
+/* Terminal card */
+.terminal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 0.8rem;
+}
+.terminal-bar {
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  padding: 0.6rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.dot { width: 11px; height: 11px; border-radius: 50%; }
+.dot-r { background: #ef4444; }
+.dot-y { background: #eab308; }
+.dot-g { background: #22c55e; }
+.terminal-title {
+  margin-left: 0.5rem;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+.terminal-body {
+  padding: 1.25rem 1.5rem;
+  line-height: 1.9;
+}
+.terminal-body .prompt { color: var(--green); user-select: none; }
+.terminal-body .cmd    { color: var(--text); }
+.terminal-body .out    { color: var(--muted); }
+.terminal-body .hi     { color: var(--accent); }
+
+/* ── Divider ─────────────────────────────────── */
+.divider {
+  max-width: 1100px;
+  margin: 0 auto;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Section wrapper ─────────────────────────── */
+.section {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+}
+.section-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.6rem;
+}
+.section-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+.section-sub {
+  color: var(--muted2);
+  max-width: 520px;
+}
+
+/* ── Features 2×2 ────────────────────────────── */
+.features {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 2.5rem;
+}
+@media (max-width: 560px) {
+  .features { grid-template-columns: 1fr; }
+}
+.feature {
+  background: var(--surface);
+  padding: 1.75rem;
+  transition: background 0.15s;
+}
+.feature:hover { background: var(--surface2); }
+.feature-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+.feature-icon svg { width: 18px; height: 18px; stroke: var(--accent); fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.feature h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.3rem; }
+.feature p  { font-size: 0.85rem; color: var(--muted2); line-height: 1.55; }
+
+/* ── Steps ───────────────────────────────────── */
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0;
+  margin-top: 2.5rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--border);
+}
+.step {
+  background: var(--surface);
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.step:hover { background: var(--surface2); }
+.step-num {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.step h3 { font-size: 0.95rem; font-weight: 600; }
+.step p   { font-size: 0.85rem; color: var(--muted2); line-height: 1.55; }
+.step code {
+  display: inline-block;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15em 0.5em;
+  font-size: 0.8em;
+  color: var(--text);
+  word-break: break-all;
+}
+
+/* ── Code block ──────────────────────────────── */
+.codeblock {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  margin-top: 2rem;
+  overflow-x: auto;
+  font-size: 0.83rem;
+  line-height: 1.9;
+  color: var(--text);
+}
+.codeblock .c  { color: var(--muted); }
+.codeblock .kw { color: var(--accent); }
+.codeblock .ok { color: var(--green); }
+
+/* ── Waitlist ─────────────────────────────────── */
+.waitlist-section {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.waitlist-inner {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 5rem 1.5rem;
+  text-align: center;
+}
+.waitlist-inner .section-title { margin-bottom: 0.5rem; }
+.waitlist-inner p { color: var(--muted2); margin-bottom: 2rem; }
+.waitlist-form {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.waitlist-form input[type="email"] {
+  flex: 1;
+  min-width: 240px;
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 0.9rem;
+  padding: 0.65rem 1rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.waitlist-form input[type="email"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+#wl-msg {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  min-height: 1.2em;
+  color: var(--muted2);
+}
+#wl-msg.ok  { color: var(--green); }
+#wl-msg.err { color: #ef4444; }
+
+/* ── Self-host ────────────────────────────────── */
+.selfhost-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-top: 2.5rem;
+  align-items: start;
+}
+@media (max-width: 640px) {
+  .selfhost-grid { grid-template-columns: 1fr; }
+}
+.selfhost-text p { color: var(--muted2); margin-bottom: 1rem; line-height: 1.7; }
+.selfhost-text a { font-weight: 500; }
+
+/* ── Footer ──────────────────────────────────── */
+footer {
+  border-top: 1px solid var(--border);
+}
+.footer-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
 </style>
 </head>
 <body>
 
-<header>
-  <h1>remo<span>apps</span></h1>
-  <p>Git-push deploy for your VPS. No Kubernetes, no Docker, no ops tax.</p>
-  <div class="badge">invite-only beta</div>
-</header>
-
-<main>
-
-  <section>
-    <h2>What it is</h2>
-    <p>remo turns any VPS into a personal PaaS. You <code>git push</code>, your app is live at <code>{you}-{app}.remoapps.site</code>. That's it.</p>
-    <br>
-    <div class="features">
-      <div class="feature">
-        <div class="icon">⚡</div>
-        <strong>Instant deploys</strong>
-        <span>git push → live in under 5 seconds</span>
-      </div>
-      <div class="feature">
-        <div class="icon">🔒</div>
-        <strong>Isolated workers</strong>
-        <span>V8 isolates, not containers</span>
-      </div>
-      <div class="feature">
-        <div class="icon">🌐</div>
-        <strong>Custom domains</strong>
-        <span>Point any domain, TLS auto-provisioned</span>
-      </div>
-      <div class="feature">
-        <div class="icon">🔑</div>
-        <strong>SSH key auth</strong>
-        <span>No passwords, no dashboard login</span>
-      </div>
+<!-- Nav -->
+<nav>
+  <div class="nav-inner">
+    <div class="logo">
+      remo<span>apps</span>
+      <span class="tag">beta</span>
     </div>
-  </section>
+    <div class="nav-right">
+      <a class="nav-link" href="https://github.com/gleicon/remo">GitHub</a>
+      <a class="nav-link" href="#waitlist">Request access</a>
+      <button id="theme-btn" aria-label="Toggle theme" title="Toggle light/dark">
+        <!-- sun icon (shown in dark mode) -->
+        <svg id="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3" stroke="currentColor" stroke-width="2"/><line x1="12" y1="21" x2="12" y2="23" stroke="currentColor" stroke-width="2"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" stroke="currentColor" stroke-width="2"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" stroke="currentColor" stroke-width="2"/><line x1="1" y1="12" x2="3" y2="12" stroke="currentColor" stroke-width="2"/><line x1="21" y1="12" x2="23" y2="12" stroke="currentColor" stroke-width="2"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" stroke="currentColor" stroke-width="2"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" stroke="currentColor" stroke-width="2"/></svg>
+        <!-- moon icon (shown in light mode) -->
+        <svg id="icon-moon" viewBox="0 0 24 24" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+  </div>
+</nav>
 
-  <section>
-    <h2>How it works</h2>
-    <ol class="steps">
-      <li>
-        <strong>Install the CLI</strong>
-        Download and login once:
-        <br><br>
-        <code>curl -fsSL https://remoapps.site/install.sh | sh</code>
-        <br>
-        <code>remo login --server https://remoapps.site --token &lt;your-token&gt;</code>
-      </li>
-      <li>
-        <strong>Create an app</strong>
-        <code>remo app create myapp</code>
-        <br>
-        Gets you <code>you-myapp.remoapps.site</code> instantly.
-      </li>
-      <li>
-        <strong>Add the remote and push</strong>
-        <pre>git remote add remo git@remoapps.site:myapp
-git push remo main</pre>
-      </li>
-      <li>
-        <strong>Done</strong>
-        Your app is live. Every subsequent <code>git push</code> deploys atomically — zero downtime, rollback in one command.
-      </li>
-    </ol>
-  </section>
+<!-- Hero -->
+<div class="hero">
+  <div class="hero-text">
+    <h1>Deploy apps with<br><em>git push.</em><br>No Kubernetes.</h1>
+    <p>remo turns any VPS into a personal PaaS. Push code, get a live URL. Rollback in one command. Zero ops tax.</p>
+    <div class="hero-cta">
+      <a href="#waitlist" class="btn-primary">Request access</a>
+      <a href="https://github.com/gleicon/remo" class="btn-ghost">View source →</a>
+    </div>
+  </div>
 
-  <section>
-    <h2>Deploy workflow</h2>
-    <pre><span class="comment"># push deploys automatically</span>
-<span class="cmd">git push remo main</span>
-  ↓ git archive
-  ↓ extract → deploys/&lt;sha&gt;/
-  ↓ symlink swap: current/ → deploys/&lt;sha&gt;/
-  ↓ nano-rs reload
-<span class="comment">Deployed myapp @ a1b2c3d4</span>
+  <div class="terminal">
+    <div class="terminal-bar">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+      <span class="terminal-title">bash</span>
+    </div>
+    <div class="terminal-body mono">
+      <div><span class="prompt">$ </span><span class="cmd">remo app create myapp</span></div>
+      <div class="out">  created alice-myapp.remoapps.site</div>
+      <br>
+      <div><span class="prompt">$ </span><span class="cmd">git remote add remo git@remoapps.site:myapp</span></div>
+      <div><span class="prompt">$ </span><span class="cmd">git push remo main</span></div>
+      <div class="out">  → git archive</div>
+      <div class="out">  → extract deploys/<span class="hi">a1b2c3d4</span>/</div>
+      <div class="out">  → symlink swap</div>
+      <div class="out">  → nano-rs reload</div>
+      <div class="out">  <span class="hi">✓</span> Deployed myapp @ <span class="hi">a1b2c3d4</span></div>
+      <br>
+      <div><span class="prompt">$ </span><span class="cmd">remo rollback myapp</span></div>
+      <div class="out">  rolled back to <span class="hi">9f8e7d6c</span></div>
+    </div>
+  </div>
+</div>
 
-<span class="comment"># instant rollback</span>
-<span class="cmd">remo rollback myapp</span>
+<hr class="divider">
 
-<span class="comment"># live runtime stats</span>
-<span class="cmd">remo logs myapp --follow</span></pre>
-  </section>
+<!-- Features -->
+<div class="section">
+  <div class="section-label">Why remo</div>
+  <div class="section-title">Everything you need, nothing you don't</div>
+  <p class="section-sub">Built for developers who own a VPS and don't want to manage Kubernetes to deploy a side project.</p>
 
-  <section>
-    <h2>Self-host remo</h2>
-    <p style="color: var(--muted); margin-bottom: 1rem;">remo is open source. Run it on your own VPS in minutes.</p>
-    <pre><span class="comment"># on your VPS (as root)</span>
+  <div class="features">
+    <div class="feature">
+      <div class="feature-icon">
+        <svg viewBox="0 0 24 24"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </div>
+      <h3>Sub-5-second deploys</h3>
+      <p><code>git push</code> triggers archive → extract → atomic symlink swap → worker reload. No build step, no image pull.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">
+        <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <h3>V8 isolate workers</h3>
+      <p>Apps run in V8 isolates via nano-rs — not containers. Fast startup, low memory overhead, per-request isolation.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      </div>
+      <h3>Custom domains + TLS</h3>
+      <p>Point any domain via an A record. <code>remo domain set myapp example.com</code> provisions the cert automatically with Let's Encrypt.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">
+        <svg viewBox="0 0 24 24"><path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      </div>
+      <h3>SSH key auth only</h3>
+      <p>No web dashboard, no OAuth. Git push uses your existing SSH key. The CLI authenticates with a bearer token you generate once.</p>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- How it works -->
+<div class="section">
+  <div class="section-label">Getting started</div>
+  <div class="section-title">From zero to deployed in four steps</div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">01</div>
+      <h3>Install the CLI</h3>
+      <p>Download the binary and point it at your remo server.</p>
+      <code>remo login --server https://remoapps.site --token &lt;token&gt;</code>
+    </div>
+    <div class="step">
+      <div class="step-num">02</div>
+      <h3>Create an app</h3>
+      <p>One command, instant subdomain.</p>
+      <code>remo app create myapp</code>
+    </div>
+    <div class="step">
+      <div class="step-num">03</div>
+      <h3>Add the remote</h3>
+      <p>Wire your local repo to the remo SSH endpoint.</p>
+      <code>git remote add remo git@remoapps.site:myapp</code>
+    </div>
+    <div class="step">
+      <div class="step-num">04</div>
+      <h3>Push and ship</h3>
+      <p>Every push is a deploy. Instant rollback if something breaks.</p>
+      <code>git push remo main</code>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- Self-host -->
+<div class="section">
+  <div class="section-label">Open source</div>
+  <div class="section-title">Self-host on your own VPS</div>
+
+  <div class="selfhost-grid">
+    <div class="selfhost-text">
+      <p>remo is MIT-licensed and designed to run on a single $6/mo VPS. One binary. No database server, no message queue, no service mesh.</p>
+      <p>The install command writes the nginx config, creates the git system user, and generates your master token — then gets out of the way.</p>
+      <a href="https://github.com/gleicon/remo">github.com/gleicon/remo →</a>
+    </div>
+    <div class="codeblock mono">
+<span class="c"># download and install</span>
 wget -qO /usr/local/bin/remo \
-  https://github.com/gleicon/remo/releases/latest/download/remo-linux-amd64
+  https://github.com/gleicon/remo/releases/\
+latest/download/remo-linux-amd64
 chmod +x /usr/local/bin/remo
-remo server install --domain apps.yourdomain.tld</pre>
-    <br>
-    <p>→ <a href="https://github.com/gleicon/remo">github.com/gleicon/remo</a></p>
-  </section>
 
-  <section>
-    <h2>Request access</h2>
-    <div class="waitlist-box">
-      <p>remoapps.site is invite-only. Leave your email and I'll reach out when a slot opens.</p>
-      <form id="wl-form">
-        <div class="form-row">
-          <input type="email" id="wl-email" placeholder="you@example.com" required autocomplete="email">
-          <button type="submit" id="wl-btn">Request access</button>
-        </div>
-        <div id="wl-msg"></div>
-      </form>
+<span class="c"># provision the VPS (run as root)</span>
+remo server install \
+  --domain apps.yourdomain.tld
+
+<span class="c"># enable the service</span>
+systemctl enable --now remo
+<span class="ok">✓ remo 0.5.3 running on :7070</span>
     </div>
-  </section>
+  </div>
+</div>
 
-</main>
+<hr class="divider">
 
+<!-- Waitlist -->
+<div class="waitlist-section" id="waitlist">
+  <div class="waitlist-inner">
+    <div class="section-label">Early access</div>
+    <div class="section-title">Request an invite</div>
+    <p>remoapps.site is invite-only. Leave your email — I'll reach out when a slot opens.</p>
+    <form class="waitlist-form" id="wl-form">
+      <input type="email" id="wl-email" placeholder="you@example.com" required autocomplete="email">
+      <button type="submit" class="btn-primary" id="wl-btn">Request access</button>
+    </form>
+    <div id="wl-msg"></div>
+  </div>
+</div>
+
+<!-- Footer -->
 <footer>
-  <span>remoapps.site</span>
-  <span><a href="https://github.com/gleicon/remo">open source on GitHub</a></span>
+  <div class="footer-inner">
+    <span class="mono" style="color: var(--muted)">remoapps.site</span>
+    <span>Built with <a href="https://github.com/gleicon/remo">remo</a> · MIT license</span>
+  </div>
 </footer>
 
 <script>
-document.getElementById('wl-form').addEventListener('submit', async function(e) {
+// ── Theme toggle ──────────────────────────────────────────────────────────────
+(function () {
+  const html = document.documentElement;
+  const btn  = document.getElementById('theme-btn');
+  const sun  = document.getElementById('icon-sun');
+  const moon = document.getElementById('icon-moon');
+
+  function applyTheme(t) {
+    html.setAttribute('data-theme', t);
+    sun.style.display  = t === 'dark'  ? 'block' : 'none';
+    moon.style.display = t === 'light' ? 'block' : 'none';
+  }
+
+  // Initialise: localStorage → system preference → dark
+  const saved = localStorage.getItem('remo-theme');
+  const sys   = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  applyTheme(saved || sys);
+
+  btn.addEventListener('click', function () {
+    const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    localStorage.setItem('remo-theme', next);
+  });
+})();
+
+// ── Waitlist form ─────────────────────────────────────────────────────────────
+document.getElementById('wl-form').addEventListener('submit', async function (e) {
   e.preventDefault();
   const email = document.getElementById('wl-email').value.trim();
-  const btn = document.getElementById('wl-btn');
-  const msg = document.getElementById('wl-msg');
+  const btn   = document.getElementById('wl-btn');
+  const msg   = document.getElementById('wl-msg');
   btn.disabled = true;
   msg.className = '';
   msg.textContent = '';
@@ -329,18 +650,18 @@ document.getElementById('wl-form').addEventListener('submit', async function(e) 
       body: JSON.stringify({ email }),
     });
     if (res.status === 201) {
-      msg.className = 'ok';
-      msg.textContent = "You're on the list. I'll be in touch.";
+      msg.className   = 'ok';
+      msg.textContent = "You're on the list. I'll reach out soon.";
       document.getElementById('wl-email').value = '';
     } else {
       const body = await res.json().catch(() => ({}));
-      msg.className = 'err';
-      msg.textContent = body.error || 'Something went wrong, try again.';
+      msg.className   = 'err';
+      msg.textContent = body.error || 'Something went wrong — try again.';
       btn.disabled = false;
     }
   } catch (_) {
-    msg.className = 'err';
-    msg.textContent = 'Network error, try again.';
+    msg.className   = 'err';
+    msg.textContent = 'Network error — try again.';
     btn.disabled = false;
   }
 });
