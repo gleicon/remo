@@ -445,8 +445,8 @@ footer {
 <!-- Hero -->
 <div class="hero">
   <div class="hero-text">
-    <h1>Your own<br><em>edge workers.</em><br>Your own VPS.</h1>
-    <p>remo deploys JavaScript apps to a V8 isolate runtime on your own server. Same model as Cloudflare Workers — export a <code>fetch</code> handler, get a live URL — but you own the infra, the domain, and the bill.</p>
+    <h1>JavaScript worker runtime.<br><em>git push</em> to deploy.</h1>
+    <p>remo runs JavaScript apps in V8 isolates on a server you control. Export a <code>fetch</code> handler, push to deploy, get a subdomain. No containers, no build pipeline.</p>
     <div class="hero-cta">
       <a href="#waitlist" class="btn-primary">Request access</a>
       <a href="https://github.com/gleicon/remo" class="btn-ghost">View source →</a>
@@ -483,60 +483,38 @@ footer {
 <!-- Runtime explainer -->
 <div class="section">
   <div class="section-label">The runtime</div>
-  <div class="section-title">Like Cloudflare Workers, but on metal you own</div>
-  <p class="section-sub">remo uses <a href="https://github.com/nicholasgasior/nano-rs" target="_blank">nano-rs</a> as the execution engine — a Rust-based V8 runtime that runs JavaScript in isolated contexts, one per request.</p>
+  <div class="section-title">How it works</div>
+  <p class="section-sub"><a href="https://github.com/gleicon/nano-rs" target="_blank">nano-rs</a> is the execution engine — a Rust process that embeds V8 and runs each JavaScript app in an isolated context. remo is the deploy layer on top of it.</p>
 
   <div class="features" style="margin-top: 2.5rem;">
     <div class="feature">
       <div class="feature-icon">
         <svg viewBox="0 0 24 24"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
       </div>
-      <h3>JavaScript / TypeScript only</h3>
-      <p>Apps export a <code>fetch(request)</code> handler. nano-rs calls it per request inside a V8 isolate. No Python, no Go, no Dockerfile — just JS.</p>
+      <h3>JavaScript / TypeScript</h3>
+      <p>Apps export a <code>fetch(request): Response</code> handler. nano-rs calls it for each incoming HTTP request inside a V8 isolate. If you've written a Cloudflare Worker, the model is the same.</p>
     </div>
     <div class="feature">
       <div class="feature-icon">
         <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       </div>
-      <h3>Isolate-per-request</h3>
-      <p>Each request runs in a fresh V8 context — no shared state between requests by default. Cold start is microseconds, not seconds. No container overhead.</p>
+      <h3>Isolate per request</h3>
+      <p>No shared global state between requests by default. Isolates start in microseconds. Multiple worker processes run in parallel under load and are scaled with <code>remo scale</code>.</p>
     </div>
     <div class="feature">
       <div class="feature-icon">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
       </div>
       <h3>Custom domains + TLS</h3>
-      <p>Point any domain with an A record. <code>remo domain set myapp example.com</code> writes the nginx vhost and provisions a Let's Encrypt cert automatically.</p>
+      <p><code>remo domain set myapp example.com</code> writes an nginx vhost and runs certbot. The cert renews automatically. No manual nginx config.</p>
     </div>
     <div class="feature">
       <div class="feature-icon">
         <svg viewBox="0 0 24 24"><path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
       </div>
-      <h3>No vendor lock-in</h3>
-      <p>Your VPS, your domain, your data. Migrate away by pointing DNS elsewhere. No per-request pricing, no cold-start penalties from a shared fleet.</p>
+      <h3>SSH key auth, no dashboard</h3>
+      <p>Git push authenticates with your existing SSH key. The CLI uses a bearer token. There is no web UI to log into.</p>
     </div>
-  </div>
-</div>
-
-<hr class="divider">
-
-<!-- Comparison -->
-<div class="section">
-  <div class="section-label">How it compares</div>
-  <div class="section-title">Not a container PaaS. Not a managed edge.</div>
-  <p class="section-sub">remo sits in a gap between Cloudflare Workers (managed, JS-only, no SSH) and Render/Fly (containers, higher ops overhead).</p>
-
-  <div class="codeblock mono" style="margin-top: 2rem; font-size: 0.78rem; line-height: 1.75;">
-<span class="c">                     remo        Cloudflare Workers   Render / Fly</span>
-<span class="c">─────────────────────────────────────────────────────────────────────</span>
-Runtime              <span class="ok">V8 isolates</span> <span class="ok">V8 isolates</span>          containers
-Language             <span class="hi">JS / TS</span>     <span class="hi">JS / TS</span>              any
-Infra ownership      <span class="ok">yours</span>       vendor               vendor
-git push deploy      <span class="ok">yes</span>         no (wrangler)        yes
-SSH access           <span class="ok">yes</span>         no                   limited
-Per-request pricing  <span class="ok">no</span>          yes                  no
-Custom domains       <span class="ok">yes</span>         yes                  yes
-Cold starts          <span class="ok">μs</span>          μs                   seconds
   </div>
 </div>
 
@@ -584,8 +562,8 @@ Cold starts          <span class="ok">μs</span>          μs                   
 
   <div class="selfhost-grid">
     <div class="selfhost-text">
-      <p>remo is MIT-licensed and designed to run on a single $6/mo VPS. One binary. No database server, no message queue, no service mesh.</p>
-      <p>The install command writes the nginx config, creates the git system user, and generates your master token — then gets out of the way.</p>
+      <p>remo is MIT-licensed. It runs as a single binary, uses SQLite for state, and expects nginx and nano-rs already running on the same host.</p>
+      <p><code>remo server install</code> writes the nginx config, creates the <code>git</code> system user, and generates a master token. After that, deploys happen over SSH.</p>
       <a href="https://github.com/gleicon/remo">github.com/gleicon/remo →</a>
     </div>
     <div class="codeblock mono">
@@ -612,8 +590,8 @@ systemctl enable --now remo
 <div class="waitlist-section" id="waitlist">
   <div class="waitlist-inner">
     <div class="section-label">Early access</div>
-    <div class="section-title">Request an invite</div>
-    <p>remoapps.site is invite-only. Leave your email — I'll reach out when a slot opens.</p>
+    <div class="section-title">Request access</div>
+    <p>remoapps.site is invite-only. Leave your email and I'll get back to you.</p>
     <form class="waitlist-form" id="wl-form">
       <input type="email" id="wl-email" placeholder="you@example.com" required autocomplete="email">
       <button type="submit" class="btn-primary" id="wl-btn">Request access</button>
