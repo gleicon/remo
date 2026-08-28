@@ -17,7 +17,7 @@ The Docker image is ephemeral — rebuilding it changes nothing about live data.
 ### 1. Release a new version
 
 ```bash
-make release VERSION=v0.5.7
+make release VERSION=v0.5.8
 ```
 
 This bumps `Cargo.toml`, commits, tags, and pushes — CI builds a static `remo-linux-amd64` binary (~2 min).

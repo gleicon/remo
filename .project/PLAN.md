@@ -2,7 +2,7 @@
 
 ## Current state
 
-remo v0.5.6, nano-rs v2.8.1. Control plane live on VPS at remoapps.site. All phases complete.
+remo v0.5.8, nano-rs v2.7.0. Control plane live on VPS at remoapps.site. All phases complete.
 
 ---
 
