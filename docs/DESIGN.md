@@ -65,23 +65,36 @@ Owner prefix is enforced at app create — two users can each have an app named 
 All endpoints require `Authorization: Bearer <token>`. Admin endpoints require the master token or an `is_admin` user.
 
 ```
-GET    /health                            public
-GET    /api/apps                          list apps (own only, or all if admin)
-POST   /api/apps                          create app  {name, type, entrypoint}
+GET    /                                  landing page (HTML)          public
+GET    /health                            service health check         public
+POST   /waitlist                          submit email for access      public  {email}
+POST   /api/invites/:token/claim          claim invite + register SSH  public  {ssh_pubkey}
+
+GET    /api/apps                          list apps (own, or all if admin)
+POST   /api/apps                          create app                   {name, type, entrypoint}
 GET    /api/apps/:name                    app detail
-DELETE /api/apps/:name                    delete app
-GET    /api/apps/:name/deployments        deployment history
-POST   /api/apps/:name/rollback           roll back  {sha?}
-POST   /api/apps/:name/scale              set workers  {workers}
+DELETE /api/apps/:name                    delete app + deregister from nano-rs
+GET    /api/apps/:name/deployments        deployment history (sha, status, timestamp)
+POST   /api/apps/:name/rollback           roll back to sha             {sha?}
+POST   /api/apps/:name/scale              set worker count             {workers}
+POST   /api/apps/:name/drain              graceful drain (stop new requests)
+GET    /api/apps/:name/stats              live isolate stats from nano-rs /admin/isolates
 GET    /api/apps/:name/env                list env keys (values masked)
-POST   /api/apps/:name/env                set env vars  {vars: {k: v}}
+POST   /api/apps/:name/env                set env vars                 {vars: {k: v}}
 DELETE /api/apps/:name/env/:key           unset env var
-PUT    /api/apps/:name/domain             set custom domain  {domain}
+PUT    /api/apps/:name/domain             set custom domain            {domain}
 DELETE /api/apps/:name/domain             clear custom domain
-GET    /api/apps/:name/logs               deployment log output
-GET    /api/users                         (admin)
-POST   /api/users                         (admin)  {name, ssh_pubkey?}
-DELETE /api/users/:name                   (admin)
+GET    /api/apps/:name/logs               deployment history as text
+
+GET    /api/users                         (admin) list users
+POST   /api/users                         (admin) create user          {name, ssh_pubkey?}
+DELETE /api/users/:name                   (admin) delete user + revoke SSH key
+
+POST   /api/admin/invites                 (admin) create invite token  {username, email?, expires_in_secs?}
+GET    /api/admin/invites                 (admin) list invites
+GET    /api/admin/waitlist                (admin) list waitlist entries
+POST   /api/admin/waitlist/:id/approve    (admin) create user from waitlist entry  {username?}
+DELETE /api/admin/waitlist/:id            (admin) reject waitlist entry
 ```
 
 `AppResponse` shape:
@@ -105,8 +118,8 @@ DELETE /api/users/:name                   (admin)
 
 1. Add a variant to `ProxyBackend` enum in `src/config.rs`.
 2. Create `src/proxy/<name>.rs` implementing the `ProxyBackend` trait (`src/proxy/mod.rs`).
-3. Wire the variant in `src/cli/server.rs` → `write_proxy_config()`.
-4. Call `write_vhost()` / `delete_vhost()` from `apps_create` / `apps_delete` in `src/server/api.rs` (not yet wired for any backend).
+3. Wire the variant in `src/proxy/mod.rs` → `from_config()`.
+4. Wire the variant in `src/cli/server.rs` → `write_proxy_config()`.
 
 ### Add a new CLI subcommand
 
@@ -124,4 +137,4 @@ Add a method to `NanoClient` in `src/nano_client.rs`. The client talks to `http:
 
 ### Add per-app resource limits
 
-`CreateAppRequest` in `src/nano_client.rs` has `cpu_time_ms` and `memory_mb` fields already sent to nano-rs. Store limits in a new DB column, populate from `nano.json` (parsed in `git_hook.rs` — not yet implemented), and pass through `DeployContext`.
+`CreateAppRequest` in `src/nano_client.rs` has an `AppLimits` struct (`workers`, `memory_mb`, `timeout_secs`) sent to nano-rs on every deploy. Worker count defaults to 2. To expose limits via the API, add a DB column, populate from the request, and pass through `DeployContext`.
