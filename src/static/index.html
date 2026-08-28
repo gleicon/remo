@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>remoapps — git push deploy for your VPS</title>
+<title>remo — git push deploy for your VPS</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -458,7 +458,7 @@ footer {
       <div class="dot dot-r"></div>
       <div class="dot dot-y"></div>
       <div class="dot dot-g"></div>
-      <span class="terminal-title">index.js → remoapps.site</span>
+      <span class="terminal-title">index.js → {{domain}}</span>
     </div>
     <div class="terminal-body mono">
       <div class="out"><span class="c">// your entire app</span></div>
@@ -473,7 +473,7 @@ footer {
       <br>
       <div><span class="prompt">$ </span><span class="cmd">git push remo main</span></div>
       <div class="out">  <span class="hi">✓</span> Deployed myapp @ <span class="hi">a1b2c3d4</span></div>
-      <div class="out">  <span class="hi">→</span> https://alice-myapp.remoapps.site</div>
+      <div class="out">  <span class="hi">→</span> https://alice-myapp.{{domain}}</div>
     </div>
   </div>
 </div>
@@ -530,7 +530,7 @@ footer {
       <div class="step-num">01</div>
       <h3>Install the CLI</h3>
       <p>Download the binary and point it at your remo server.</p>
-      <code>remo login --server https://remoapps.site --token &lt;token&gt;</code>
+      <code>remo login --server https://{{domain}} --token &lt;token&gt;</code>
     </div>
     <div class="step">
       <div class="step-num">02</div>
@@ -542,7 +542,7 @@ footer {
       <div class="step-num">03</div>
       <h3>Add the remote</h3>
       <p>Wire your local repo to the remo SSH endpoint.</p>
-      <code>git remote add remo git@remoapps.site:myapp</code>
+      <code>git remote add remo git@{{domain}}:myapp</code>
     </div>
     <div class="step">
       <div class="step-num">04</div>
@@ -591,7 +591,7 @@ systemctl enable --now remo
   <div class="waitlist-inner">
     <div class="section-label">Early access</div>
     <div class="section-title">Request access</div>
-    <p>remoapps.site is invite-only. Leave your email and I'll get back to you.</p>
+    <p>{{domain}} is invite-only. Leave your email and I'll get back to you.</p>
     <form class="waitlist-form" id="wl-form">
       <input type="email" id="wl-email" placeholder="you@example.com" required autocomplete="email">
       <button type="submit" class="btn-primary" id="wl-btn">Request access</button>
@@ -603,7 +603,7 @@ systemctl enable --now remo
 <!-- Footer -->
 <footer>
   <div class="footer-inner">
-    <span class="mono" style="color: var(--muted)">remoapps.site</span>
+    <span class="mono" style="color: var(--muted)">{{domain}}</span>
     <span>Built with <a href="https://github.com/gleicon/remo">remo</a> · MIT license</span>
   </div>
 </footer>

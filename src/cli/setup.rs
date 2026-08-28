@@ -26,10 +26,7 @@ pub async fn run(args: SetupArgs) -> Result<()> {
 // ── Invite claim (user-facing) ────────────────────────────────────────────────
 
 async fn run_invite(token: String) -> Result<()> {
-    let server_url = prompt_default(
-        "Server URL",
-        "https://remoapps.site",
-    )?;
+    let server_url = prompt("Server URL (e.g. https://remo.yourdomain.tld)")?;
 
     // Validate invite before generating SSH key
     let client = reqwest::Client::new();
@@ -84,7 +81,7 @@ async fn run_invite(token: String) -> Result<()> {
 async fn run_interactive() -> Result<()> {
     println!("remo setup\n");
 
-    let server_url = prompt_default("Server URL", "https://remoapps.site")?;
+    let server_url = prompt("Server URL (e.g. https://remo.yourdomain.tld)")?;
 
     println!("How are you setting up?");
     println!("  1  Admin — I have a master token (first-time server setup)");

@@ -71,8 +71,10 @@ pub fn public_routes() -> Router<Arc<AppState>> {
         .route("/api/invites/{token}/claim", post(invite_claim))
 }
 
-async fn landing() -> impl IntoResponse {
-    axum::response::Html(include_str!("../static/index.html"))
+async fn landing(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let html = include_str!("../static/index.html")
+        .replace("{{domain}}", &state.cfg.domain);
+    axum::response::Html(html)
 }
 
 async fn health() -> impl IntoResponse {
