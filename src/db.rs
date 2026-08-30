@@ -154,6 +154,14 @@ pub async fn app_list_by_owner(pool: &SqlitePool, owner: &str) -> Result<Vec<App
 }
 
 pub async fn app_delete(pool: &SqlitePool, name: &str) -> Result<bool> {
+    sqlx::query("DELETE FROM deployments WHERE app_id=?")
+        .bind(name)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM env_vars WHERE app_id=?")
+        .bind(name)
+        .execute(pool)
+        .await?;
     let n = sqlx::query("DELETE FROM apps WHERE id=?")
         .bind(name)
         .execute(pool)
