@@ -127,6 +127,7 @@ impl NanoClient {
                 env_vars: Some(env),
                 entrypoint: None,
                 limits: None,
+                compat: None,
             })
             .send()
             .await?;
@@ -172,6 +173,10 @@ pub struct CreateAppRequest {
     /// Immediately activate the app (skip pending phase).
     #[serde(default = "bool_true")]
     pub activate: bool,
+    /// nano-rs compat mode: "auto" (default), "gas", or "standard".
+    /// Send "gas" for Google Apps Script apps; omit otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compat: Option<String>,
 }
 
 fn bool_true() -> bool { true }
@@ -184,4 +189,6 @@ pub struct UpdateAppRequest {
     pub env_vars: Option<std::collections::HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limits: Option<AppLimits>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compat: Option<String>,
 }

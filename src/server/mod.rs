@@ -109,10 +109,13 @@ async fn sync_apps_to_nano(pool: &sqlx::SqlitePool, cfg: &ServerConfig) {
                 .into_iter()
                 .collect();
 
+        let compat = if app.app_type == "gas" { Some("gas".to_string()) } else { None };
+
         let update_res = nano.update_app(&hostname, &UpdateAppRequest {
             entrypoint: Some(entrypoint.clone()),
             env_vars: if env_vars.is_empty() { None } else { Some(env_vars.clone()) },
             limits: None,
+            compat: compat.clone(),
         }).await;
 
         let registered = match update_res {
@@ -124,6 +127,7 @@ async fn sync_apps_to_nano(pool: &sqlx::SqlitePool, cfg: &ServerConfig) {
                     env_vars,
                     limits: AppLimits { workers: 2, ..Default::default() },
                     activate: true,
+                    compat,
                 }).await {
                     Ok(()) => true,
                     Err(e) => {

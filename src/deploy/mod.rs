@@ -106,6 +106,8 @@ async fn reload_nano(ctx: &DeployContext, entrypoint: &Path) -> Result<()> {
     let entrypoint_str = entrypoint.to_string_lossy().into_owned();
     let env: std::collections::HashMap<_, _> = ctx.env_vars.clone();
 
+    let compat = if ctx.app_type == "gas" { Some("gas".to_string()) } else { None };
+
     // Try reload (app already registered in nano-rs); fall back to create on 404 (first deploy).
     let update = ctx
         .nano_client
@@ -115,6 +117,7 @@ async fn reload_nano(ctx: &DeployContext, entrypoint: &Path) -> Result<()> {
                 entrypoint: Some(entrypoint_str.clone()),
                 env_vars: if env.is_empty() { None } else { Some(env.clone()) },
                 limits: None,
+                compat: compat.clone(),
             },
         )
         .await;
@@ -129,6 +132,7 @@ async fn reload_nano(ctx: &DeployContext, entrypoint: &Path) -> Result<()> {
                     env_vars: env,
                     limits: crate::nano_client::AppLimits { workers: 2, ..Default::default() },
                     activate: true,
+                    compat,
                 })
                 .await?;
         }
